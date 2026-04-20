@@ -46,16 +46,27 @@ _SCALAR_ROUNDTRIP_DTYPE_CASES = [
 ]
 
 # Applied per parametrized variant (see test_cross_device_copy_scalar_fill).
-_SCALAR_FILL_SKIP = unittest.skip("TODO: Support 0-dim tensors in Spyre")
+#TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1487 
+_SCALAR_FILL_XFAIL = pytest.mark.xfail(reason="Support 0-dim tensors in Spyre")
 
-# Scalar eager `.add(2.0)` after device transfer — per-dtype skips (see test_cross_device_copy_scalar_add).
-# ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1153 (to_dtype / Inductor)
-_SCALAR_ADD_SKIP_TO_DTYPE = unittest.skip(
-    "TODO: Support scalar eager add with to_dtype lowering in Spyre"
+#TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1153 (to_dtype / Inductor)
+_SCALAR_ADD_XFAIL_TO_DTYPE = pytest.mark.xfail(
+    reason="Support scalar eager add with to_dtype lowering in Spyre"
 )
-_SCALAR_ADD_SKIP_FP8 = unittest.skip(
-    "TODO: Support scalar eager add for DataFormats.SEN143_FP8 in Spyre"
+#TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1474 (DataFormats.SEN143_FP8)
+_SCALAR_ADD_XFAIL_FP8 = pytest.mark.xfail(
+    reason="Support scalar eager add for DataFormats.SEN143_FP8 in Spyre"
 )
+#TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/925
+_SCALAR_ADD_SKIP_INT = pytest.mark.skip(
+    reason="Spyre backend does not support int32/int16 dtype - causes segfault/crash in data format converter"
+)
+
+#TODO:ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1588
+_SCALAR_ADD_SKIP_UINT8 = pytest.mark.skip(
+    reason="Spyre hardware requires 128-byte aligned buffers - small uint8 tensors cause alignment violations"
+)
+
 _SCALAR_ADD_FALLBACK_FULL_WARN = r"torch\.ops\.spyre\.full is falling back to cpu"
 
 
@@ -235,8 +246,8 @@ class TestSpyre(TestCase):
     @parametrize(
         "factory_name",
         [
-            subtest("zeros", name="zeros", decorators=[_SCALAR_FILL_SKIP]),
-            subtest("ones", name="ones", decorators=[_SCALAR_FILL_SKIP]),
+            subtest("zeros", name="zeros", decorators=[_SCALAR_FILL_XFAIL]),
+            subtest("ones", name="ones", decorators=[_SCALAR_FILL_XFAIL]),
         ],
     )
     def test_cross_device_copy_scalar_fill(self, factory_name):
@@ -256,17 +267,32 @@ class TestSpyre(TestCase):
             subtest(
                 (torch.int8, lambda: torch.tensor(10, dtype=torch.int8), None),
                 name="int8",
-                decorators=[_SCALAR_ADD_SKIP_TO_DTYPE],
+                decorators=[_SCALAR_ADD_XFAIL_TO_DTYPE],
             ),
             subtest(
                 (torch.bool, lambda: torch.tensor(True, dtype=torch.bool), None),
                 name="bool",
-                decorators=[_SCALAR_ADD_SKIP_TO_DTYPE],
+                decorators=[_SCALAR_ADD_XFAIL_TO_DTYPE],
             ),
             subtest(
                 (torch.int64, lambda: torch.tensor(10, dtype=torch.int64), None),
                 name="int64",
-                decorators=[_SCALAR_ADD_SKIP_TO_DTYPE],
+                decorators=[_SCALAR_ADD_XFAIL_TO_DTYPE],
+            ),
+            subtest(
+                (torch.uint8, lambda: torch.tensor(10, dtype=torch.uint8), None),
+                name="uint8",
+                decorators=[_SCALAR_ADD_SKIP_UINT8],
+            ),
+            subtest(
+                (torch.int16, lambda: torch.tensor(10, dtype=torch.int16), None),
+                name="int16",
+                decorators=[_SCALAR_ADD_SKIP_INT],
+            ),
+            subtest(
+                (torch.int32, lambda: torch.tensor(10, dtype=torch.int32), None),
+                name="int32",
+                decorators=[_SCALAR_ADD_SKIP_INT],
             ),
             subtest(
                 (
@@ -277,7 +303,7 @@ class TestSpyre(TestCase):
                     None,
                 ),
                 name="float8_e4m3fn",
-                decorators=[_SCALAR_ADD_SKIP_FP8],
+                decorators=[_SCALAR_ADD_XFAIL_FP8],
             ),
             subtest(
                 (

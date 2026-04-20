@@ -2121,8 +2121,9 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
             return x
 
         # RuntimeError: Error: In-device copy not implemented.
+        # ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1381
         if execution_mode == "eager":
-            pytest.skip(reason="spyre__fill_scalar crashes with SIGBUS in eager mode - in-device copy not implemented")
+            pytest.xfail(reason="spyre__fill_scalar crashes with SIGBUS in eager mode - in-device copy not implemented")
     
         compare_with_cpu(
             fn, x,
