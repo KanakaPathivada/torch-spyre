@@ -434,9 +434,6 @@ class TestSdpaScalarHyperparameters:
         # TODO: ISSUE https://github.com/torch-spyre/torch-spyre/issues/543
         if execution_mode == "eager":
             pytest.xfail(reason="Eager mode: aten::_reshape_alias operation not implemented")
-        #TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1377
-        elif execution_mode == "compiled":
-            pytest.xfail(reason="Compiled mode: batchmatmul stickification failed - cannot map output stick_dim")
         
         def attention_with_bias(q, k, v):
             d_k = q.size(-1)
