@@ -15,7 +15,7 @@
 # Owner(s): ["module: cpp"]
 
 import os
-import re
+import regex as re
 import unittest
 import psutil
 import warnings
@@ -46,23 +46,23 @@ _SCALAR_ROUNDTRIP_DTYPE_CASES = [
 ]
 
 # Applied per parametrized variant (see test_cross_device_copy_scalar_fill).
-#TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1487 
+# TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1487
 _SCALAR_FILL_XFAIL = pytest.mark.xfail(reason="Support 0-dim tensors in Spyre")
 
-#TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1153 (to_dtype / Inductor)
+# TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1153 (to_dtype / Inductor)
 _SCALAR_ADD_XFAIL_TO_DTYPE = pytest.mark.xfail(
     reason="Support scalar eager add with to_dtype lowering in Spyre"
 )
-#TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1474 (DataFormats.SEN143_FP8)
+# TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1474 (DataFormats.SEN143_FP8)
 _SCALAR_ADD_XFAIL_FP8 = pytest.mark.xfail(
     reason="Support scalar eager add for DataFormats.SEN143_FP8 in Spyre"
 )
-#TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/925
+# TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/925
 _SCALAR_ADD_SKIP_INT = pytest.mark.skip(
     reason="Spyre backend does not support int32/int16 dtype - causes segfault/crash in data format converter"
 )
 
-#TODO:ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1588
+# TODO:ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1588
 _SCALAR_ADD_SKIP_UINT8 = pytest.mark.skip(
     reason="Spyre hardware requires 128-byte aligned buffers - small uint8 tensors cause alignment violations"
 )
@@ -334,19 +334,19 @@ class TestSpyre(TestCase):
 
     def test_cross_device_copy(self):
         a = torch.rand(10, dtype=torch.float16)
-        b = (
-            a.to(device="spyre")
-            .add(2.0)
-            .to(device="cpu")
-        )
+        b = a.to(device="spyre").add(2.0).to(device="cpu")
         self.assertEqual(b, a + 2)
 
     def test_cross_device_copy_dtypes(self):
         dtype_configs = {
             torch.int8: lambda: (torch.rand(64, 64) * 100).to(dtype=torch.int8),
             torch.bool: lambda: torch.randint(0, 2, (64, 64), dtype=torch.bool),
-            torch.int64: lambda: torch.randint(-32768, 32767, (64, 64), dtype=torch.int64),
-            torch.float8_e4m3fn: lambda: torch.rand(64, 64).to(dtype=torch.float8_e4m3fn),
+            torch.int64: lambda: torch.randint(
+                -32768, 32767, (64, 64), dtype=torch.int64
+            ),
+            torch.float8_e4m3fn: lambda: torch.rand(64, 64).to(
+                dtype=torch.float8_e4m3fn
+            ),
             torch.float16: lambda: torch.rand(64, 64, dtype=torch.float16),
             torch.float32: lambda: torch.rand(64, 64, dtype=torch.float32),
         }

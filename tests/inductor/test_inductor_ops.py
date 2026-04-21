@@ -1413,8 +1413,16 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         },
         ("test_fill_scalar", "test_fill_scalar_cpu"): {
             "param_sets": {
-                "1d_eager": (5.0, torch.tensor([1, -2, 3], dtype=torch.float16), "eager"),
-                "1d_compiled": (5.0, torch.tensor([1, -2, 3], dtype=torch.float16), "compiled"),
+                "1d_eager": (
+                    5.0,
+                    torch.tensor([1, -2, 3], dtype=torch.float16),
+                    "eager",
+                ),
+                "1d_compiled": (
+                    5.0,
+                    torch.tensor([1, -2, 3], dtype=torch.float16),
+                    "compiled",
+                ),
             },
         },
         ("test_addmm_scaled", "test_addmm_scaled_cpu"): {
@@ -2123,12 +2131,15 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         # RuntimeError: Error: In-device copy not implemented.
         # ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1381
         if execution_mode == "eager":
-            pytest.xfail(reason="spyre__fill_scalar crashes with SIGBUS in eager mode - in-device copy not implemented")
-    
+            pytest.xfail(
+                reason="spyre__fill_scalar crashes with SIGBUS in eager mode - in-device copy not implemented"
+            )
+
         compare_with_cpu(
-            fn, x,
+            fn,
+            x,
             run_compile=(execution_mode == "compiled"),
-            run_eager=(execution_mode == "eager")
+            run_eager=(execution_mode == "eager"),
         )
 
     @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
