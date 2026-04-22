@@ -46,7 +46,7 @@ _SCALAR_ROUNDTRIP_DTYPE_CASES = [
 ]
 
 # Applied per parametrized variant (see test_cross_device_copy_scalar_fill).
-# TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1487
+# TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1172
 _SCALAR_FILL_XFAIL = pytest.mark.xfail(reason="Support 0-dim tensors in Spyre")
 
 # TODO: ISSUE: https://github.com/torch-spyre/torch-spyre/issues/1153 (to_dtype / Inductor)
