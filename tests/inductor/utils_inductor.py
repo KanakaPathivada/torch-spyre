@@ -467,7 +467,6 @@ def compare_with_cpu(
     run_eager=True,
     run_compile=True,
 ):
-
     """Compare Spyre execution against CPU for one or both Spyre execution paths.
 
     ``run_compile`` and ``run_eager`` select ``torch.compile`` vs eager on ``DEVICE``
@@ -491,7 +490,7 @@ def compare_with_cpu(
         # the bool function parses all non-empty strings to true
         # if this env var is set at all, it gets marked as true
         cpu_compile = bool(os.getenv("TEST_COMPARE_CPU_COMPILE"))
-    
+
     cpu_result = fn(*args)
 
     # Order: compiled first, then eager (matches prior [True, False] when both on).
