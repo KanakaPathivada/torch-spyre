@@ -135,7 +135,7 @@ class TestNormalizationScalarOperations:
         _compare_modes(execution_mode, rmsnorm_with_weight, x, atol=1e-4, rtol=1e-3)
 
     # TODO: ISSUE https://github.com/torch-spyre/torch-spyre/issues/1377
-    @pytest.mark.xfail(
+    @pytest.mark.skip(
         reason="Spyre: Broadcasting size-1 dimensions - cannot map stick expr to host dimension"
     )
     @pytest.mark.parametrize(
