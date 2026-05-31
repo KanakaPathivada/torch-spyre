@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
-
 import pytest
 import torch
 
@@ -64,14 +62,6 @@ class TestTransposeEdge:
         x = torch.empty(shape, dtype=torch.float16)
         _compare_mode(execution_mode, lambda t: t.transpose(0, 1), x)
 
-    def test_transpose_scalar_tensor(self, execution_mode):
-        del (
-            execution_mode
-        )  # Parametrized like upd; raises are not a compare_with_cpu case
-        x = torch.tensor(3.14, dtype=torch.float16)
-        with pytest.raises((IndexError, RuntimeError)):
-            x.transpose(0, 1)
-
     # --- Memory / aspect ---
     def test_transpose_very_large_tensor(self, execution_mode):
         try:
@@ -96,14 +86,10 @@ class TestTransposeEdge:
 
     # --- Dtypes ---
 
+    @pytest.mark.xfail(reason="Issue #1545: Complex dtype not supported on Spyre")
     def test_transpose_complex_dtype(self, execution_mode):
         x = torch.randn((64, 128), dtype=torch.complex64)
-        try:
-            _compare_mode(execution_mode, lambda t: t.transpose(0, 1), x)
-        except RuntimeError as e:
-            if "not support" in str(e).lower() or "not implement" in str(e).lower():
-                pytest.xfail(reason="Issue #1545: Complex dtype not supported on Spyre")
-            raise
+        _compare_mode(execution_mode, lambda t: t.transpose(0, 1), x)
 
     def test_transpose_bool_dtype(self, execution_mode):
         x = torch.randint(0, 2, (64, 128), dtype=torch.bool)
@@ -154,7 +140,9 @@ class TestTransposeEdge:
     # --- Special values ---
     def test_transpose_nan_inf_preserving(self, execution_mode):
         """NaN/Inf slots preserved through transpose (utils assert_close uses equal_nan)."""
-        x = cached_randn((64, 128), dtype=torch.float16)
+        # clone() is required: cached_randn is lru_cache'd, so mutating its return value
+        # would corrupt the cached tensor for all subsequent tests sharing this cache key.
+        x = cached_randn((64, 128), dtype=torch.float16).clone()
         x[0, 0] = float("nan")
         x[1, 1] = float("inf")
         x[2, 2] = float("-inf")
@@ -177,37 +165,6 @@ class TestTransposeEdge:
         """Tall×1 fp32 flip; (64,1) fp16 is already in test_t_2d* in ops_latest."""
         y = cached_randn((16, 1), dtype=torch.float32)
         _compare_mode(execution_mode, lambda t: t.transpose(0, 1), y)
-
-    # --- Stride parity CPU vs Spyre (.is_contiguous() flag) ---
-    def test_transpose_contiguous_flag_matches_cpu(self, execution_mode):
-        del execution_mode
-        x_cpu = cached_randn((2, 4, 8, 16))
-        x_sp = x_cpu.to(SPYRE)
-        for d0, d1 in ((1, 3), (2, 3)):
-            assert (
-                x_sp.transpose(d0, d1).is_contiguous()
-                == x_cpu.transpose(d0, d1).is_contiguous()
-            )
-
-    # --- View semantics (Spyre tensors) ---
-    def test_transpose_creates_view(self, execution_mode):
-        del execution_mode
-        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
-        y = x.transpose(1, 3)
-        assert y.data_ptr() == x.data_ptr()
-
-    def test_shared_storage(self, execution_mode):
-        del execution_mode
-        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
-        y = x.transpose(1, 3)
-        assert x.untyped_storage().data_ptr() == y.untyped_storage().data_ptr()
-
-    def test_view_chain(self, execution_mode):
-        del execution_mode
-        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
-        y = x.transpose(1, 3)
-        z = y.transpose(0, 2)
-        assert x.untyped_storage().data_ptr() == z.untyped_storage().data_ptr()
 
     # --- Indexed views (skipped: #1800) ---
     @pytest.mark.skip(
@@ -278,9 +235,52 @@ class TestTransposeEdge:
         expected = (x.transpose(1, 3) * 2.0) + 1.0
         assert torch.allclose(y_out, expected, rtol=1e-5, atol=1e-5)
 
-    def test_multiple_compiles_transpose(self, execution_mode):
-        del execution_mode
 
+# Tests below do not vary by execution_mode — moving them out of the
+# parametrized TestTransposeEdge class avoids running each test twice
+# (eager + compiled) with no added coverage.
+@pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
+class TestTransposeDeviceSemantics:
+    """Device-level transpose semantics: error handling, view invariants, compilation."""
+
+    def setup_method(self):
+        torch.manual_seed(0xAFFE)
+
+    # --- Error / invalid ---
+    def test_transpose_scalar_tensor(self):
+        x = torch.tensor(3.14, dtype=torch.float16)
+        with pytest.raises((IndexError, RuntimeError)):
+            x.transpose(0, 1)
+
+    # --- Stride parity CPU vs Spyre (.is_contiguous() flag) ---
+    def test_transpose_contiguous_flag_matches_cpu(self):
+        x_cpu = cached_randn((2, 4, 8, 16))
+        x_sp = x_cpu.to(SPYRE)
+        for d0, d1 in ((1, 3), (2, 3)):
+            assert (
+                x_sp.transpose(d0, d1).is_contiguous()
+                == x_cpu.transpose(d0, d1).is_contiguous()
+            )
+
+    # --- View semantics (Spyre tensors) ---
+    def test_transpose_creates_view(self):
+        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
+        y = x.transpose(1, 3)
+        assert y.data_ptr() == x.data_ptr()
+
+    def test_shared_storage(self):
+        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
+        y = x.transpose(1, 3)
+        assert x.untyped_storage().data_ptr() == y.untyped_storage().data_ptr()
+
+    def test_view_chain(self):
+        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
+        y = x.transpose(1, 3)
+        z = y.transpose(0, 2)
+        assert x.untyped_storage().data_ptr() == z.untyped_storage().data_ptr()
+
+    # --- Compilation: correctness across multiple compiled functions ---
+    def test_multiple_compiles_transpose(self):
         @torch.compile
         def fn1(x):
             return x.transpose(1, 3)
@@ -293,12 +293,14 @@ class TestTransposeEdge:
         y1 = fn1(x)
         y2 = fn2(x)
 
+        x_ref = cached_randn((2, 4, 8, 16))
         assert y1.shape == (2, 16, 8, 4)
         assert y2.shape == (2, 4, 16, 8)
+        assert torch.allclose(y1.cpu(), x_ref.transpose(1, 3), atol=1e-4, rtol=1e-4)
+        assert torch.allclose(y2.cpu(), x_ref.transpose(2, 3), atol=1e-4, rtol=1e-4)
 
-    def test_compilation_cache_transpose(self, execution_mode):
-        del execution_mode
-
+    # --- Compilation: cached compilation reuses the same graph for different inputs ---
+    def test_compilation_cache_transpose(self):
         @torch.compile
         def fn(x):
             return x.transpose(1, 3)
@@ -309,7 +311,11 @@ class TestTransposeEdge:
         y1 = fn(x1)
         y2 = fn(x2)
 
+        x1_ref = cached_randn((2, 4, 8, 16))
+        x2_ref = cached_randn((2, 4, 8, 16), differentiation=1)
         assert y1.shape == y2.shape
+        assert torch.allclose(y1.cpu(), x1_ref.transpose(1, 3), atol=1e-4, rtol=1e-4)
+        assert torch.allclose(y2.cpu(), x2_ref.transpose(1, 3), atol=1e-4, rtol=1e-4)
 
 
 if __name__ == "__main__":

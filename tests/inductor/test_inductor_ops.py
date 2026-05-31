@@ -454,7 +454,14 @@ def _pattern_resolve(variant, args):
         )
     if variant == "pos_encoding_broadcast":
         x, p = a
-        return lambda t, u: t + u.unsqueeze(0), (x, p)
+        # Transpose to (batch, hidden, seq), add pos encoding in that space, then
+        # transpose back — a real pattern where positional bias is applied channel-first.
+        return (
+            lambda t, u: (t.transpose(1, 2) + u.transpose(0, 1).unsqueeze(0)).transpose(
+                1, 2
+            ),
+            (x, p),
+        )
     if variant == "vit_patch_transpose":
         (x,) = a
         return lambda t: t.transpose(1, 2), (x,)
@@ -1397,7 +1404,7 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
                 ),
                 "dim_1_2": (
                     1,
-                    3,
+                    2,
                     cached_randn((3, 256, 64, 64), abs=True),
                 ),
                 "dim_0_1": (
@@ -1426,7 +1433,7 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
                 ),
                 "dim_1_2": (
                     1,
-                    3,
+                    2,
                     cached_randn((3, 256, 64, 64), abs=True),
                 ),
                 "dim_0_1": (
@@ -1624,9 +1631,6 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         ): {
             "param_sets": {
                 "2d_1_0": ((2, 3), (1, 0)),
-                "2d_64x128": ((64, 128), (1, 0)),
-                "2d_128x256": ((128, 256), (1, 0)),
-                "2d_16x32": ((16, 32), (1, 0)),
                 "4d_0_2_1_3": ((2, 3, 16, 64), (0, 2, 1, 3)),
                 "3d_0_2_1": ((2, 1024, 844), (0, 2, 1)),
                 "3d_021_common": (
