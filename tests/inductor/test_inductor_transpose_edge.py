@@ -54,9 +54,6 @@ class TestTransposeEdge:
             pytest.param((64, 0), id="zero_cols"),
         ],
     )
-    @pytest.mark.xfail(
-        reason="Issue #1861: Spyre _copy_from: invalid .strides() on Python Tensor; empty tensor H2D/copy path.",
-    )
     def test_transpose_zero_extent(self, execution_mode, shape):
         """Transpose when one axis has size 0; matches ``test_inductor_transpose_upd`` (xfail until fixed)."""
         x = torch.empty(shape, dtype=torch.float16)
