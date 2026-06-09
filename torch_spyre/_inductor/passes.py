@@ -76,6 +76,7 @@ from .dedup_constants import dedup_and_promote_constants
 from .chunk_large_tensors import chunk_large_tensors
 from .coarse_tile import coarse_tile
 from .indices_to_address_pass import add_indices_to_address_pass
+from .detect_indirect_access import detect_indirect_access
 
 
 logger = get_inductor_logger("passes")
@@ -317,6 +318,7 @@ class CustomPreSchedulingPasses:
     def __init__(self):
         self.passes = [
             deadcode_elimination,
+            detect_indirect_access,
             #
             # Tensor Layout (Stickification)
             propagate_spyre_tensor_layouts,
