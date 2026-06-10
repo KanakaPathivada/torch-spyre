@@ -25,26 +25,6 @@ from .constants import SEGMENT_OFFSETS
 from .errors import Unsupported
 from .op_spec import OpSpec
 
-def is_indirect_access_operation(op) -> bool:
-    """Check if an operation uses indirect access (e.g., gather, scatter, index_select).
-
-    Indirect access operations have op_info with either 'index_args' or 'index_value_pairs'.
-
-    Args:
-        op: Operation to check (typically a ComputedBuffer or SchedulerNode)
-
-    Returns:
-        True if the operation uses indirect access, False otherwise
-    """
-    if not hasattr(op, "data"):
-        return False
-    if not hasattr(op.data, "op_info"):
-        return False
-    if not op.data.op_info:
-        return False
-
-    return "index_args" in op.data.op_info or "index_value_pairs" in op.data.op_info
-
 
 def get_labeled_layout_metadata(
     tensor_name: str,
@@ -683,6 +663,26 @@ def get_indirect_layout_label(
         layouts, dim_order, effective_stick, stick_size, layout_labels
     )
 
+
+def is_indirect_access_operation(op) -> bool:
+    """Check if an operation uses indirect access (e.g., gather, scatter, index_select).
+
+    Indirect access operations have op_info with either 'index_args' or 'index_value_pairs'.
+
+    Args:
+        op: Operation to check (typically a ComputedBuffer or SchedulerNode)
+
+    Returns:
+        True if the operation uses indirect access, False otherwise
+    """
+    if not hasattr(op, "data"):
+        return False
+    if not hasattr(op.data, "op_info"):
+        return False
+    if not op.data.op_info:
+        return False
+
+    return "index_args" in op.data.op_info or "index_value_pairs" in op.data.op_info
 
 def is_indirect_access_operation(op) -> bool:
     """Check if an operation uses indirect access (e.g., gather, scatter, index_select).
