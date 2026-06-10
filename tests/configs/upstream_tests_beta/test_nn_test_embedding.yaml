@@ -3,6 +3,9 @@ test_suite_config:
     - path: ${TORCH_ROOT}/test/nn/test_embedding.py
       unlisted_test_mode: skip
       tests:
+        # TestEmbeddingNN -- plain CPU tests (no device param, not device-type controlled).
+        # These validate embedding creation, from_pretrained, functional API, and
+        # EmbeddingBag CPU behavior. All currently pass on CPU.
         - names:
             - TestEmbeddingNN::test_embedding_bag_from_pretrained
             - TestEmbeddingNN::test_embedding_bag_from_pretrained_padding_idx
@@ -27,12 +30,105 @@ test_suite_config:
             - TestEmbeddingNN::test_embeddingbag_include_last_offset
             - TestEmbeddingNN::test_move_sparse_half_embedding
           mode: mandatory_success
+
+
+        # ---------------------------------------------------------------------------
+        # Indirect access operations
+        # TestEmbeddingNNDeviceType tests exercise device-dispatched embedding and
+        # embedding_bag, which perform index lookups (indirect memory reads) into
+        # the weight table using an integer index tensor.
+        # Class: TestEmbeddingNNDeviceType (has `device` param -- PRIVATEUSE1 controlled).
+        # These currently fail on Spyre until embedding indirect access is implemented.
+        # Inference-only: backward/gradient tests (test_embedding_backward*,
+        # test_embedding_dense_grad, test_embedding_max_norm_backward,
+        # test_embedding_bag_per_sample_weights_grad) are intentionally excluded.
+        # ---------------------------------------------------------------------------
+
+        # torch.nn.functional.embedding_bag -- bag-of-embeddings indirect lookup
+        # xfail: torch.nn.functional.embedding_bag is not yet implemented on Spyre.
+        - names:
+            - TestEmbeddingNNDeviceType::test_embedding_bag_device
+            - TestEmbeddingNNDeviceType::test_embedding_bag_empty_input
+            - TestEmbeddingNNDeviceType::test_embedding_bag_non_contiguous_weight
+            - TestEmbeddingNNDeviceType::test_embedding_bag_1D_padding_idx
+            - TestEmbeddingNNDeviceType::test_embedding_bag_2D_padding_idx
+            - TestEmbeddingNNDeviceType::test_embedding_bag_out_of_bounds_idx
+            - TestEmbeddingNNDeviceType::test_embedding_bag_dimension_errors
+            - TestEmbeddingNNDeviceType::test_embedding_bag_half
+            - TestEmbeddingNNDeviceType::test_embedding_bag_bfloat16
+            - TestEmbeddingNNDeviceType::test_EmbeddingBag_per_sample_weights_and_offsets
+            - TestEmbeddingNNDeviceType::test_EmbeddingBag_per_sample_weights_and_new_offsets
+            - TestEmbeddingNNDeviceType::test_EmbeddingBag_per_sample_weights_and_no_offsets
+            - TestEmbeddingNNDeviceType::test_EmbeddingBag_empty_per_sample_weights_and_offsets
+            - TestEmbeddingNNDeviceType::test_EmbeddingBag_per_sample_weights_failures
+          mode: xfail
+
+        # torch.nn.functional.embedding -- single indirect lookup into weight table
+        # xfail: torch.nn.functional.embedding is not yet implemented on Spyre.
+        - names:
+            - TestEmbeddingNNDeviceType::test_embedding_padding_idx
+            - TestEmbeddingNNDeviceType::test_embedding_max_norm_device
+          mode: xfail
+
+        # ---------------------------------------------------------------------------
+        # Tests that pass via CPU fallback (Spyre falls back to CPU for these checks)
+        # These are error-validation tests whose checks are performed at the Python /
+        # ATen layer before any device-specific kernel is dispatched.  They pass
+        # consistently on Spyre via the CPU fallback path and are promoted from xfail.
+        # FallbackWarning is emitted but the assertion holds.
+        # ---------------------------------------------------------------------------
+
+        # test_embedding_bag_out_of_bounds_idx: all 12 parametrized variants
+        # (padding_idx0 / padding_idx_0) × (sum / mean / max) × (int32 / int64)
+        # pass because the out-of-bounds index check is done in CPU fallback before
+        # the EmbeddingBag kernel is dispatched.
+        - names:
+            - TestEmbeddingNNDeviceType::test_embedding_bag_out_of_bounds_idx
+          mode: mandatory_success
+
+        # test_embedding_scalar_weight_error: weight-shape validation ("'weight' must
+        # be 2-D") fires in F.embedding before any device kernel is called.
+        - names:
+            - TestEmbeddingNNDeviceType::test_embedding_scalar_weight_error
+          mode: mandatory_success
+
+  # global:
+  #   supported_dtypes:
+  #     - name: float16
+  #       description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+  #     - name: int64
+  #       description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+  #     - name: bfloat16
+  #       description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+
   global:
     supported_dtypes:
+      # -----------------------------------------------------------------------
+      # Active dtypes — run on Spyre today
+      # -----------------------------------------------------------------------
       - name: float16
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+        description: Active in test_embedding_bag_half (@dtypes(half)),
+          test_embedding_bag_device (mixed product includes float16),
+          test_embedding_bag_non_contiguous_weight, test_embedding_max_norm_device.
+      - name: float32
+        description: Required for test_embedding_padding_idx (@dtypes(float32)),
+          test_embedding_bag_1D_padding_idx / test_embedding_bag_2D_padding_idx
+          (@dtypes(float32, float64) — float64 excluded), and the product-dtype tests
+          test_embedding_bag_out_of_bounds_idx and test_EmbeddingBag_per_sample_weights_and_no_offsets
+          (itertools.product combinations include float32).
       - name: int64
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+        description: Active as integer index dtype (bag offset/input tensors are int32/int64
+          product combinations) and in test_embedding_bag_device mixed dtypes.
       - name: bfloat16
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
-
+        description: Active in test_embedding_bag_bfloat16 (@dtypes(bfloat16)),
+          test_embedding_bag_device (mixed product), test_embedding_bag_non_contiguous_weight.
+      # -----------------------------------------------------------------------
+      # Excluded dtypes — present in upstream @dtypes but NOT yet supported on Spyre.
+      # Uncomment each entry when Spyre adds support for that dtype.
+      # -----------------------------------------------------------------------
+      # - name: float64    # upstream: test_embedding_bag_1D_padding_idx, test_embedding_bag_2D_padding_idx
+      #                    #   (@dtypes(float32, float64)); test_embedding_max_norm_device
+      #                    #   (@dtypes(float32, float64) via dtypesIfCUDA/dtypes);
+      #                    #   test_embeddingbag_from_pretrained_options (uses set_default_dtype(double)).
+      #                    # reason: Spyre maximum floating-point precision is float32.
+      # NOTE: complex and small-integer dtypes are not used by any embedding test in upstream.

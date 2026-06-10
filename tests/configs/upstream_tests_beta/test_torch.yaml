@@ -213,7 +213,6 @@ test_suite_config:
             - TestTorch::test_wildcard_import
             - TestTorchDeviceType::test_clone_not_memory_dense
             - TestTorchDeviceType::test_clone_zero_stride_dim
-            - TestTorchDeviceType::test_cov
             - TestTorchDeviceType::test_expected_failure_xla
             - TestTorchDeviceType::test_memory_format_consistency
             - TestTorchDeviceType::test_narrow_empty
@@ -222,6 +221,17 @@ test_suite_config:
             - TestTorchDeviceType::test_skip_xla
             - TestTorchDeviceType::test_tensor_type
           mode: mandatory_success
+        # torch.cov -- covariance matrix computation
+        # xfail: Spyre Inductor codegen error:
+        #   "unexpected argument Constant(value=0, dtype=torch.int64) to lesserequal"
+        #   torch.cov internally generates a lesserequal node with an int64 constant;
+        #   the Spyre kernel lowers only symbolic variables to this op, not constants.
+        # Upstream @dtypes: torch.int (int32), torch.float (float32), torch.cfloat (complex64)
+        # Spyre active dtypes after filter: float32 only (int32 and complex64 excluded)
+        - names:
+            - TestTorchDeviceType::test_cov
+          mode: xfail
+
         - names:
             - TestTorchDeviceType::test_multinomial_cpu
           mode: mandatory_success
@@ -231,12 +241,189 @@ test_suite_config:
         - names:
             - TestTorchDeviceType::test_ternary_op_mem_overlap
           mode: mandatory_success
+
+        # -----------------------------------------------------------------------
+        # Indirect access operations
+        # These tests exercise tensor-index-mediated memory access and currently
+        # fail on Spyre since indirect access is not yet implemented.
+        # Inference-only: backward/gradient tests are intentionally excluded.
+        # -----------------------------------------------------------------------
+
+        # torch.take -- gathers elements at flat 1-D integer indices
+        # xfail: torch.take is not yet implemented on Spyre.
+        # Upstream dtype coverage:
+        #   test_take       @dtypes(*all_types_and(torch.half, torch.bool, torch.bfloat16))
+        #                   active: float16, float32, int64, bfloat16, bool
+        #                   excluded: float64, int8, int16, int32, uint8
+        #   test_take_empty no @dtypes — runs once (no dtype suffix)
+        - names:
+            - TestTorchDeviceType::test_take
+            - TestTorchDeviceType::test_take_empty
+          mode: xfail
+
+        # torch.scatter / scatter_add edge cases
+        # xfail: torch.scatter and torch.scatter_add are not yet implemented on Spyre.
+        # Upstream dtype coverage:
+        #   test_scatter_zero_size_index      no @dtypes; @onlyNativeDeviceTypes → SKIPPED on Spyre
+        #   test_scatter_add_non_unique_index no @dtypes — runs once
+        #   test_scatter_to_large_input       no @dtypes — runs once
+        #   test_scatter_add_to_large_input   no @dtypes — runs once
+        #   test_scatter_bool                 no @dtypes (bool hardcoded in test body) — runs once
+        #   test_scatter_add_bool             no @dtypes (bool hardcoded in test body) — runs once
+        - names:
+            - TestTorchDeviceType::test_scatter_zero_size_index
+            - TestTorchDeviceType::test_scatter_add_non_unique_index
+            - TestTorchDeviceType::test_scatter_to_large_input
+            - TestTorchDeviceType::test_scatter_add_to_large_input
+            - TestTorchDeviceType::test_scatter_bool
+            - TestTorchDeviceType::test_scatter_add_bool
+          mode: xfail
+
+        # torch.scatter_reduce -- reduce-mode scatter on large inputs
+        # xfail: torch.scatter_reduce is not yet implemented on Spyre.
+        # Upstream dtype coverage (on privateuse1 the base @dtypes applies, not @dtypesIfCPU):
+        #   test_scatter_reduce_operations_to_large_input
+        #     @dtypesIfCPU(all_types + half + bool + bfloat16); base @dtypes(floating_and_complex_types())
+        #     → on privateuse1: float32, float64, complex64, complex128 from base
+        #     → after supported_dtypes filter: float32 only (float64 and complex types excluded)
+        #   test_scatter_reduce_scalar        same decorator set → float32 only
+        #   test_scatter_reduce_non_unique_index same → float32 only
+        - names:
+            - TestTorchDeviceType::test_scatter_reduce_operations_to_large_input
+            - TestTorchDeviceType::test_scatter_reduce_scalar
+            - TestTorchDeviceType::test_scatter_reduce_non_unique_index
+          mode: xfail
+
+        # torch.masked_scatter / masked_scatter_ -- writes at True-mask positions
+        # xfail: torch.masked_scatter is not yet implemented on Spyre.
+        # Upstream dtype coverage:
+        #   test_masked_scatter  @dtypes(*all_types_and(torch.half, torch.bool, torch.bfloat16))
+        #     active: float16, float32, int64, bfloat16, bool; excluded: float64, int8/16/32, uint8
+        #     Note: shows SKIPPED in log for float16/float32/int64/bfloat16 — possible @onlyNativeDeviceTypes
+        #     interaction; test_masked_scatter_bool_tensor has no @dtypes → runs once, FAILS (not SKIPPED)
+        #   test_masked_scatter_large_tensor   no @dtypes → SKIPPED (likely @onlyNativeDeviceTypes)
+        #   test_masked_scatter_mem_overlap    @onlyNativeDeviceTypes → always SKIPPED on Spyre
+        #   test_masked_scatter_inplace_noncontiguous no @dtypes → SKIPPED
+        - names:
+            - TestTorchDeviceType::test_masked_scatter
+            - TestTorchDeviceType::test_masked_scatter_bool_tensor
+            - TestTorchDeviceType::test_masked_scatter_large_tensor
+            - TestTorchDeviceType::test_masked_scatter_mem_overlap
+            - TestTorchDeviceType::test_masked_scatter_inplace_noncontiguous
+          mode: xfail
+
+        # torch.masked_select -- gathers elements at True-mask positions
+        # xfail: torch.masked_select is not yet implemented on Spyre.
+        # Upstream dtype coverage:
+        #   test_masked_select  @dtypes(*all_types_and(torch.half, torch.bool, torch.bfloat16))
+        #     active: float16, float32, int64, bfloat16, bool; excluded: float64, int8/16/32, uint8
+        #   test_masked_select_discontiguous  no @dtypes — runs once
+        - names:
+            - TestTorchDeviceType::test_masked_select
+            - TestTorchDeviceType::test_masked_select_discontiguous
+          mode: xfail
+
+        # torch.masked_fill / masked_fill_ -- fills at True-mask positions
+        # xfail: torch.masked_fill has a partial CPU fallback on Spyre.
+        #   test_masked_fill runs via fallback and PASSES (shows XPASS in log — non-strict, CI passes).
+        #   test_masked_fill_bool_tensor and test_masked_fill_mem_overlap do NOT fall back → XFAIL.
+        #   Keep all as xfail until masked_fill is confirmed as a deliberate supported op.
+        # Upstream dtype coverage:
+        #   test_masked_fill  @dtypes(*product_dtypes(...)) — two dtype params (tensor_dtype, mask_dtype)
+        #     active combos: float16/float32/int64/bfloat16/bool × bool/uint8
+        #   test_masked_fill_bool_tensor  no @dtypes — runs once
+        #   test_masked_fill_mem_overlap  @onlyNativeDeviceTypes → always SKIPPED on Spyre
+        - names:
+            - TestTorchDeviceType::test_masked_fill
+            - TestTorchDeviceType::test_masked_fill_bool_tensor
+            - TestTorchDeviceType::test_masked_fill_mem_overlap
+          mode: xfail
+
+        # scatter_add deterministic, and mem-overlap checks for index_add / index_copy /
+        # index_fill / index_put / scatter -- all indirect access operations
+        # xfail: none of these operations are yet implemented on Spyre.
+        - names:
+            - TestTorchDeviceType::test_scatter_add_one_dim_deterministic
+            - TestTorchDeviceType::test_index_add_mem_overlap
+            - TestTorchDeviceType::test_index_copy_mem_overlap
+            - TestTorchDeviceType::test_index_fill_mem_overlap
+            - TestTorchDeviceType::test_index_put_mem_overlap
+            - TestTorchDeviceType::test_scatter_mem_overlap
+          mode: xfail
+
+  # global:
+  #   supported_dtypes:
+  #     - name: float16
+  #       description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+  #     - name: int64
+  #       description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+  #     - name: bfloat16
+  #       description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+
+  #         edits:
+  #           dtypes:
+  #             include:
+  #               - name: float32
+  #                 description: The test iterates over several ternary PyTorch operations (addcmul, addcdiv, lerp) on both CPU and CUDA, checking that memory‑overlap
+  #                   detection works correctly for both in‑place and out‑of‑place variants when using double‑precision tensors. Double precision (float64)
+  #                   is not yet supported in spyre. The largest floating-point type supported by spyre is float32. Hence it is included.
   global:
     supported_dtypes:
+      # -----------------------------------------------------------------------
+      # Active dtypes — run on Spyre today
+      # -----------------------------------------------------------------------
       - name: float16
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+        description: Spyre primary dtype. Active in test_take (all_types_and set),
+          test_masked_scatter, test_masked_select, test_masked_fill (product-dtype combinations).
+      - name: float32
+        description: Required for test_scatter_reduce_* which on privateuse1 use the base
+          @dtypes(floating_and_complex_types()) = float32, float64, complex64, complex128.
+          After the supported_dtypes filter only float32 runs. Also active in test_cov
+          (@dtypes(int, float, cfloat) — float=float32) and test_take all_types_and set.
       - name: int64
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+        description: Active in test_take (all_types_and includes int64), test_masked_*
+          (all_types_and), and throughout as integer index tensor dtype.
       - name: bfloat16
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+        description: Active in test_take (all_types_and), test_masked_scatter,
+          test_masked_select, test_masked_fill.
+      - name: bool
+        description: Active in test_take (all_types_and includes bool), test_masked_select,
+          test_masked_fill. Also prevents extract_dtype_from_name from filtering tests whose
+          names contain "bool" (test_scatter_bool, test_scatter_add_bool,
+          test_masked_scatter_bool_tensor, test_masked_fill_bool_tensor).
 
+          edits:
+            dtypes:
+              include:
+                - name: float32
+                  description: The test iterates over several ternary PyTorch operations (addcmul, addcdiv, lerp) on both CPU and CUDA, checking that memory‑overlap
+                    detection works correctly for both in‑place and out‑of‑place variants when using double‑precision tensors. Double precision (float64)
+                    is not yet supported in spyre. The largest floating-point type supported by spyre is float32. Hence it is included.
+      # -----------------------------------------------------------------------
+      # Excluded dtypes — present in upstream @dtypes but NOT yet supported on Spyre.
+      # Uncomment each entry when Spyre adds support for that dtype.
+      # -----------------------------------------------------------------------
+      # - name: float64    # upstream: test_scatter_reduce_* (floating_and_complex_types includes float64);
+      #                    #   test_take, test_masked_scatter, test_masked_select (all_types_and).
+      #                    # reason: Spyre maximum floating-point precision is float32.
+      # - name: int8       # upstream: test_take, test_masked_scatter, test_masked_select
+      #                    #   (all_types_and includes int8).
+      #                    # reason: 8-bit integer ops not supported on Spyre.
+      # - name: int16      # upstream: test_take, test_masked_scatter, test_masked_select
+      #                    #   (all_types_and includes int16).
+      #                    # reason: 16-bit integer ops not supported on Spyre.
+      # - name: int32      # upstream: test_cov @dtypes(int, float, cfloat) — int=int32;
+      #                    #   test_take, test_masked_* (all_types_and includes int32).
+      #                    # reason: 32-bit integer ops not supported on Spyre.
+      # - name: uint8      # upstream: test_take, test_masked_scatter, test_masked_select,
+      #                    #   test_masked_fill (all_types_and includes uint8).
+      #                    # reason: unsigned integer ops not supported on Spyre.
+      # - name: complex64  # upstream: test_scatter_reduce_* (floating_and_complex_types = float32,
+      #                    #   float64, cfloat, cdouble on privateuse1); test_cov @dtypes(int,float,cfloat);
+      #                    #   test_masked_scatter, test_masked_select, test_masked_fill
+      #                    #   (all_types_and_complex_and includes cfloat).
+      #                    # reason: complex arithmetic not supported on Spyre.
+      # - name: complex128 # upstream: test_scatter_reduce_* (floating_and_complex_types includes cdouble);
+      #                    #   test_masked_scatter, test_masked_select, test_masked_fill
+      #                    #   (all_types_and_complex_and includes cdouble).
+      #                    # reason: complex arithmetic not supported on Spyre.
