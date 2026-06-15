@@ -203,6 +203,8 @@ jobs:
             config: torch_spyre_tests/inductor/test_unroll_loop_specs_config.yaml
           - name: Inductor Work Division Hint
             config: torch_spyre_tests/inductor/test_work_division_hint_config.yaml
+          - name: Test Tensor Transpose
+            config: torch_spyre_tests/inductor/test_inductor_transpose_edge_config.yaml
           # ---- Tensor tests ----
           - name: Tensor Coordinates
             config: torch_spyre_tests/tensors/test_coordinates_config.yaml
@@ -214,10 +216,13 @@ jobs:
             config: torch_spyre_tests/tensors/test_resize_config.yaml
           - name: Tensor Memory Format
             config: torch_spyre_tests/tensors/test_memory_format_config.yaml
+<<<<<<< HEAD
           - name: Tensor Model Loading Layout
             config: torch_spyre_tests/tensors/test_model_utils_config.yaml
           - name: Tensor Transpose
             config: torch_spyre_tests/inductor/test_inductor_transpose_edge.py
+=======
+>>>>>>> 3d9bc61 (updated yaml config)
 
     steps:
       - name: Checkout composite actions
