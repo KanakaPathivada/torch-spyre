@@ -216,6 +216,8 @@ jobs:
             config: torch_spyre_tests/tensors/test_memory_format_config.yaml
           - name: Tensor Model Loading Layout
             config: torch_spyre_tests/tensors/test_model_utils_config.yaml
+          - name: Tensor Transpose
+            config: torch_spyre_tests/inductor/test_inductor_transpose_edge.py
 
     steps:
       - name: Checkout composite actions
