@@ -203,7 +203,7 @@ jobs:
             config: torch_spyre_tests/inductor/test_unroll_loop_specs_config.yaml
           - name: Inductor Work Division Hint
             config: torch_spyre_tests/inductor/test_work_division_hint_config.yaml
-          - name: Test Tensor Transpose
+          - name: Inductor Tensor Transpose
             config: torch_spyre_tests/inductor/test_inductor_transpose_edge_config.yaml
           # ---- Tensor tests ----
           - name: Tensor Coordinates
