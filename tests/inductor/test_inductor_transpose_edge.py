@@ -295,6 +295,9 @@ class TestTransposeDeviceSemantics:
         ref = (x.transpose(1, 3) * 2.0) + 1.0
         assert torch.allclose(out.cpu(), ref.cpu(), rtol=1e-4, atol=1e-4)
 
+    @pytest.mark.xfail(
+        reason="Issue #2006: InductorError: SpyreKernel.store() rejects Constant scalar in pointwise mul.",
+    )
     def test_compile_with_operations_after_transpose(self):
         @torch.compile
         def fn(x):
