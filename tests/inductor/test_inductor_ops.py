@@ -5185,7 +5185,7 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
             return a + b.t()
 
         self.compare_with_cpu(fn, a, b, run_eager=False)
-    
+
     @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
     def test_transpose_patterns_cpu(self, variant, execution_mode, *args):
         if variant == "attn_qkv_projection":
