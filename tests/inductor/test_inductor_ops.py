@@ -342,6 +342,10 @@ _PATTERN_TOL = {
     "transformer_decoder_cross_attention": (1e-1, 1e-1),
     "vit_attention_cls_token": (1e-2, 1e-1),
     "pos_encoding_broadcast": (2e-3, 1e-2),
+    # Pure transpose / view+transpose / transpose+contiguous+view.
+    "vit_patch_transpose": (1e-3, 1e-2),
+    "attn_multi_head_split": (1e-3, 1e-2),
+    "attn_head_concat": (1e-3, 1e-2),
 }
 
 

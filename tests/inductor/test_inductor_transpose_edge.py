@@ -55,7 +55,7 @@ class TestTransposeEdge:
         ],
     )
     def test_transpose_zero_extent(self, execution_mode, shape):
-        """Transpose when one axis has size 0; matches ``test_inductor_transpose_upd`` (xfail until fixed)."""
+        """Transpose when one axis has size 0."""
         x = torch.empty(shape, dtype=torch.float16)
         _compare_mode(execution_mode, lambda t: t.transpose(0, 1), x)
 
@@ -202,36 +202,6 @@ class TestTransposeEdge:
         x = cached_randn((72, 91), dtype=torch.float16)
         _compare_mode(execution_mode, lambda t: t.transpose(0, 1).clone(), x)
 
-    def test_transpose_mul_add_compiled_matches_eager(self, execution_mode):
-        del execution_mode
-
-        def fn(x):
-            y = x.transpose(1, 3)
-            return y * 2.0 + 1.0
-
-        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
-        out = torch.compile(fn)(x)
-        ref = (x.transpose(1, 3) * 2.0) + 1.0
-        assert torch.allclose(out.cpu(), ref.cpu(), rtol=1e-4, atol=1e-4)
-
-    @pytest.mark.xfail(
-        reason="Issue #1639: Backend does not support dtype conversion in comparison operations"
-    )
-    def test_compile_with_operations_after_transpose(self, execution_mode):
-        del execution_mode
-
-        @torch.compile
-        def fn(x):
-            y = x.transpose(1, 3)
-            z = y * 2.0
-            return z + 1.0
-
-        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
-        y_out = fn(x)
-
-        expected = (x.transpose(1, 3) * 2.0) + 1.0
-        assert torch.allclose(y_out, expected, rtol=1e-5, atol=1e-5)
-
 
 # Tests below do not vary by execution_mode — moving them out of the
 # parametrized TestTransposeEdge class avoids running each test twice
@@ -313,6 +283,30 @@ class TestTransposeDeviceSemantics:
         assert y1.shape == y2.shape
         assert torch.allclose(y1.cpu(), x1_ref.transpose(1, 3), atol=1e-3, rtol=1e-3)
         assert torch.allclose(y2.cpu(), x2_ref.transpose(1, 3), atol=1e-3, rtol=1e-3)
+
+    # --- Compiled transpose fused with pointwise ops ---
+    def test_transpose_mul_add_compiled_matches_eager(self):
+        def fn(x):
+            y = x.transpose(1, 3)
+            return y * 2.0 + 1.0
+
+        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
+        out = torch.compile(fn)(x)
+        ref = (x.transpose(1, 3) * 2.0) + 1.0
+        assert torch.allclose(out.cpu(), ref.cpu(), rtol=1e-4, atol=1e-4)
+
+    def test_compile_with_operations_after_transpose(self):
+        @torch.compile
+        def fn(x):
+            y = x.transpose(1, 3)
+            z = y * 2.0
+            return z + 1.0
+
+        x = cached_randn((2, 4, 8, 16)).to(SPYRE)
+        y_out = fn(x)
+
+        expected = (x.transpose(1, 3) * 2.0) + 1.0
+        assert torch.allclose(y_out, expected, rtol=1e-5, atol=1e-5)
 
 
 if __name__ == "__main__":
