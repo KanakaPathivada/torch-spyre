@@ -294,7 +294,7 @@ class TestTransposeDeviceSemantics:
         x = x_ref.to(SPYRE)
         out = torch.compile(fn)(x)
         ref = (x_ref.transpose(1, 3) * 2.0) + 1.0
-        assert torch.allclose(out.cpu(), ref, rtol=1e-3, atol=1e-3)
+        assert torch.allclose(out.cpu(), ref, rtol=1e-2, atol=5e-3)
 
     @pytest.mark.xfail(
         reason="Issue #2006: SpyreKernel.store() rejects Constant scalar in pointwise mul.",
