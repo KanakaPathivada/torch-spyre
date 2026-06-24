@@ -287,7 +287,7 @@ class TestTransposeDeviceSemantics:
     # --- Compiled transpose fused with pointwise ops ---
     def test_transpose_mul_add_compiled_matches_eager(self):
         def fn(x):
-            y = x.transpose(1, 3)
+            y = x.transpose(1, 3).contiguous()
             return y * 2.0 + 1.0
 
         x_ref = cached_randn((2, 4, 8, 16))
