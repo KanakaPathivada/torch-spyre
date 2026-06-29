@@ -42,17 +42,68 @@ void JobPlanStepH2D::write(std::ostream& os) const {
      << "\n";
 }
 
-void JobPlanStepD2H::construct(LaunchContext&,
+// void JobPlanStepD2H::construct(LaunchContext&,
+//                                flex::RuntimeStream* flex_stream) const {
+//   flex::DmaParams params(host_address_, device_address_.total_size(),
+//                          /*to_device=*/false, &device_address_);
+//   params.pipeline_barrier = pipeline_barrier_;
+//   flex_stream->launchOperationD2H(&params);
+// }
+
+// TODO(jni): move to flex
+// convert CompositeAddress to dmva
+static int64_t composite_address_to_dmva(
+    const flex::CompositeAddress& composite_address) {
+  size_t num_chunks = composite_address.chunks().size();
+  TORCH_CHECK(num_chunks == 1, "Interleaved not supported yet");
+
+  const auto& addr = composite_address.chunks()[0].addr;
+  auto& allocator = SpyreAllocator::instance();
+  auto seg_id = allocator.segmentForRegion(addr.region_id);
+  auto address = flex::SegmentByteOffset_todmva(seg_id, addr.offset);
+  return address;
+}
+
+void JobPlanStepD2H::construct(LaunchContext& ctx,
                                flex::RuntimeStream* flex_stream) const {
-  flex::DmaParams params(host_address_, device_address_.total_size(),
-                         /*to_device=*/false, &device_address_);
-  params.pipeline_barrier = pipeline_barrier_;
-  flex_stream->launchOperationD2H(&params);
+  if (device_address_.has_value()) {
+    flex::DmaParams params(host_address_, device_address_.value().total_size(),
+                           /*to_device=*/false, &(device_address_.value()));
+    params.pipeline_barrier = pipeline_barrier_;
+    flex_stream->launchOperationD2H(&params);
+  } else {
+    auto segment_id = flex::SegmentId(dmva_);
+    const auto& tensor = ctx.inputs_outputs.at(segment_id);
+    const auto& tensor_address =
+        static_cast<SharedOwnerCtx*>(tensor.storage().data_ptr().get_context())
+            ->composite_addr;
+    TORCH_CHECK(tensor_address.chunks().size() == 1,
+                "Tensor address must have 1 chunk");
+    const auto& base_chunk = tensor_address.chunks()[0];
+    flex::LogicalAddress offset_addr(
+        base_chunk.addr.region_id, base_chunk.addr.offset + dmva_ -
+                                       (segment_id << flex::SEGMENT_SIZE_BITS));
+    flex::Chunk offset_chunk(offset_addr, size_, base_chunk.domain_id);
+
+    // Create shared_ptr to manage lifetime - will be kept alive by callback
+    auto device_address =
+        std::make_shared<flex::CompositeAddress>(offset_chunk);
+
+    flex::DmaParams params(host_address_, device_address.get()->total_size(),
+                           /*to_device=*/false, device_address.get());
+    params.callback = [device_address](void*) {};
+    flex_stream->launchOperationD2H(&params);
+  }
 }
 
 void JobPlanStepD2H::write(std::ostream& os) const {
   os << "  D2H (Device-to-Host)\n";
-  os << "    Device address: " << device_address_ << "\n";
+  // os << "    Device address: " << device_address_ << "\n";
+  if (device_address_.has_value()) {
+    os << "    Device address: " << *device_address_ << "\n";
+  } else {
+    os << "    Device hmva: " << dmva_ << "\n";
+  }
   os << "    Host address: " << host_address_ << "\n";
   os << "    Pipeline barrier: " << (pipeline_barrier_ ? "enabled" : "disabled")
      << "\n";
@@ -87,17 +138,17 @@ void JobPlanStepCompute::write(std::ostream& os) const {
 
 // TODO(jni): move to flex
 // convert CompositeAddress to dmva
-static int64_t composite_address_to_dmva(
-    const flex::CompositeAddress& composite_address) {
-  size_t num_chunks = composite_address.chunks().size();
-  TORCH_CHECK(num_chunks == 1, "Interleaved not supported yet");
+// static int64_t composite_address_to_dmva(
+//     const flex::CompositeAddress& composite_address) {
+//   size_t num_chunks = composite_address.chunks().size();
+//   TORCH_CHECK(num_chunks == 1, "Interleaved not supported yet");
 
-  const auto& addr = composite_address.chunks()[0].addr;
-  auto& allocator = SpyreAllocator::instance();
-  auto seg_id = allocator.segmentForRegion(addr.region_id);
-  auto address = flex::SegmentByteOffset_todmva(seg_id, addr.offset);
-  return address;
-}
+//   const auto& addr = composite_address.chunks()[0].addr;
+//   auto& allocator = SpyreAllocator::instance();
+//   auto seg_id = allocator.segmentForRegion(addr.region_id);
+//   auto address = flex::SegmentByteOffset_todmva(seg_id, addr.offset);
+//   return address;
+// }
 
 void JobPlanStepHostCompute::construct(LaunchContext& ctx,
                                        flex::RuntimeStream* flex_stream) const {

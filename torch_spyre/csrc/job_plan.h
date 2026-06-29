@@ -284,7 +284,10 @@ class JobPlanStepH2D final : public JobPlanStep {
    * @brief Construct H2D step with raw host pointer
    *
    * @param host_address Host memory address (lifetime managed by JobPlan)
-   * @param device_address Device memory address
+  //  * @param device_address Device memory address
+   * @param device_address Device memory address (optional)
+   * @param dmva Device memory virtual address
+   * @param size Size of data to transfer
    */
   JobPlanStepH2D(void* host_address, flex::CompositeAddress device_address)
       : host_address_(host_address),
@@ -314,9 +317,14 @@ class JobPlanStepD2H final : public JobPlanStep {
    * @param device_address Device memory address
    * @param host_address Host memory address (caller manages lifetime)
    */
-  JobPlanStepD2H(flex::CompositeAddress device_address, void* host_address)
+  // JobPlanStepD2H(flex::CompositeAddress device_address, void* host_address)
+  JobPlanStepD2H(std::optional<flex::CompositeAddress> device_address,
+                 void* host_address, uint64_t dmva, size_t size)
       : device_address_(std::move(device_address)),
-        host_address_(host_address) {}
+        // host_address_(host_address) {}
+        host_address_(host_address),
+        dmva_(dmva),
+        size_(size) {}
 
   void construct(LaunchContext& ctx,
                  flex::RuntimeStream* flex_stream) const override;
@@ -324,8 +332,11 @@ class JobPlanStepD2H final : public JobPlanStep {
   void write(std::ostream& os) const override;
 
  private:
-  flex::CompositeAddress device_address_;
+  // flex::CompositeAddress device_address_;
+  std::optional<flex::CompositeAddress> device_address_;
   void* host_address_;
+  uint64_t dmva_;
+  size_t size_;
 };
 
 /**
