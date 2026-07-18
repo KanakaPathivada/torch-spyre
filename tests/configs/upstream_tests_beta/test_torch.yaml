@@ -4,34 +4,168 @@ test_suite_config:
     - path: ${TORCH_ROOT}/test/test_torch.py
       unlisted_test_mode: skip
       tests:
-        # These tests exercise various tensor operations and memory management behaviors across different dtypes.
-        # They are classified as mandatory_success because they cover core functionalities and memory safety checks.
-        # Relevant Spyre capabilities include support for bfloat16, bool, float16, float32, and int64 dtypes, and basic tensor ops.
+
+        # ===========================================================================
+        # INDIRECT ACCESS — MANDATORY_SUCCESS
+        # All tests below exercise gather / scatter / index / embedding / mask
+        # indirect access operations. Classified mandatory_success so that CI tracks
+        # every gather-functionality case regardless of current Spyre support.
+        # ===========================================================================
+
+        # ---------------------------------------------------------------------------
+        # Core indirect read path — implemented and passing on Spyre today
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorch::test_index_select
+            - TestTorchDeviceType::test_take
+            - TestTorchDeviceType::test_take_empty
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # Gather backward — training / backward path; inference-only device
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_gather_backward_deterministic_path
+            - TestTorchDeviceType::test_gather_backward_one_dim
+          mode: skip
+
+        # ---------------------------------------------------------------------------
+        # Neg-dim normalization for indirect access ops
+        # Exercises dim normalization in gather/index_select/index_copy/index_fill/
+        # index_add before the indirect-access kernel is dispatched.
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorch::test_gather_neg_dim
+            - TestTorch::test_index_select_neg_dim
+            - TestTorch::test_index_copy_neg_dim
+            - TestTorch::test_index_fill_neg_dim
+            - TestTorch::test_index_add_neg_dim
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # torch.scatter / scatter_ — Indirect Write Engine (P0)
+        # Not yet wired on Spyre (spyre_kernel.py:809 TODO).
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_scatter_to_large_input
+            - TestTorchDeviceType::test_scatter_add_to_large_input
+            - TestTorchDeviceType::test_scatter_add_bool
+            - TestTorchDeviceType::test_scatter_bool
+            - TestTorchDeviceType::test_scatter_zero_size_index
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # scatter_add / scatter_reduce — Reduction Engine (P0)
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_scatter_add_non_unique_index
+            - TestTorchDeviceType::test_scatter_add_one_dim_deterministic
+            - TestTorchDeviceType::test_scatter_reduce_non_unique_index
+            - TestTorchDeviceType::test_scatter_reduce_operations_to_large_input
+            - TestTorchDeviceType::test_scatter_reduce_scalar
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # masked_scatter / masked_scatter_ — Mask-as-Compaction (P2 per FRS)
+        # Exercises indirect write via boolean mask.
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_masked_scatter
+            - TestTorchDeviceType::test_masked_scatter_inplace_noncontiguous
+            - TestTorchDeviceType::test_masked_scatter_bool_tensor
+            - TestTorchDeviceType::test_masked_scatter_large_tensor
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # masked_select — boolean-controlled indirect read (Mask-as-Compaction P2)
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_masked_select
+            - TestTorchDeviceType::test_masked_select_discontiguous
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # put_ / put — indexed write (scatter variant; Indirect Write Engine P0)
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_put
+            - TestTorchDeviceType::test_put_empty
+            - TestTorchDeviceType::test_put_accumulate
+            - TestTorchDeviceType::test_nondeterministic_alert_put
+            - TestTorchDeviceType::test_nondeterministic_alert_put_accumulate
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # repeat_interleave — decomposes to gather/expand (GQA/MQA KV-head expansion
+        # in Llama-3, Mistral, Qwen2; FRS §10 Additional Operators)
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_repeat_interleave
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # index_add family — Reduction Engine (P0)
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorch::test_index_add
+            - TestTorch::test_index_add_all_dtypes
+            - TestTorch::test_index_add_cornercase
+            - TestTorch::test_index_add_correctness
+            - TestDevicePrecision::test_index_add_bfloat16
+            - TestTorchDeviceType::test_index_add_large_inputs
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # Advanced indexing (mixed device / CPU+Spyre)
+        # ---------------------------------------------------------------------------
         - names:
             - TestDevicePrecision::test_advancedindex_mixed_devices_error
+            - TestDevicePrecision::test_advancedindex_mixed_cpu_devices
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # EmbeddingBag nondeterministic alert — embedding = Indirect Read Engine
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_nondeterministic_alert_EmbeddingBag_max
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # Memory overlap detection for indirect access ops
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_index_add_mem_overlap
+            - TestTorchDeviceType::test_index_copy_mem_overlap
+            - TestTorchDeviceType::test_index_fill_mem_overlap
+            - TestTorchDeviceType::test_index_put_mem_overlap
+            - TestTorchDeviceType::test_masked_scatter_mem_overlap
+            - TestTorchDeviceType::test_put_mem_overlap
+            - TestTorchDeviceType::test_scatter_mem_overlap
+          mode: mandatory_success
+
+        # ===========================================================================
+        # NON-INDIRECT INFRASTRUCTURE — MANDATORY_SUCCESS
+        # Required by CI for general Spyre backend correctness.
+        # ===========================================================================
+        - names:
             - TestDevicePrecision::test_from_sequence
             - TestTorchDeviceType::test__local_scalar_dense_with_empty_tensor
             - TestTorchDeviceType::test_addcmul_cuda_errors_with_cpu_scalars
             - TestTorchDeviceType::test_bernoulli_mem_overlap
-            - TestTorchDeviceType::test_index_add_mem_overlap
-            - TestTorchDeviceType::test_index_copy_mem_overlap
             - TestTorchDeviceType::test_is_signed
             - TestTorchDeviceType::test_lazy_clone
             - TestTorchDeviceType::test_lazy_clone_view
-            - TestTorchDeviceType::test_masked_scatter_mem_overlap
             - TestTorchDeviceType::test_memory_format_consistency
             - TestTorchDeviceType::test_multinomial_device_constrain
             - TestTorchDeviceType::test_narrow_empty
             - TestTorchDeviceType::test_parallel_cow_materialize_error
-            - TestTorchDeviceType::test_put_mem_overlap
-            - TestTorchDeviceType::test_scatter_mem_overlap
             - TestTorchDeviceType::test_shift_mem_overlap
             - TestTorchDeviceType::test_storage_use_count
+            - TestTorchDeviceType::test_ternary_op_mem_overlap
             - TestTorch::test_normal_shape
           mode: mandatory_success
-        # These tests exercise the `addcdiv` operation with different dtypes, focusing on tensor operations and broadcasting.
-        # They are classified as `mandatory_success` because the Spyre backend must support these operations for basic functionality.
-        # The primary limitation is the unsupported `float32` dtype, which causes an `InductorError` due to unexpected arguments.
+
+        # test_addcdiv: float32 excluded (InductorError on unexpected args)
         - names:
             - TestTorchDeviceType::test_addcdiv
           mode: mandatory_success
@@ -39,23 +173,25 @@ test_suite_config:
             dtypes:
               exclude:
                 - name: float32
-        # # These tests exercise tensor operations with various dtypes, including unsupported ones like float8_e4m3fn and float8_e5m2fnuz.
-        # # They are classified as mandatory_success because the Spyre backend must support all listed dtypes and ops for full compatibility.
-        # # The most relevant Spyre limitations are the lack of support for certain dtypes and the unimplemented "mul_cpu_reduced_float" op.
-        # - names:
-        #     - TestTorchDeviceType::test_item
-        #   mode: mandatory_success
-        #   edits:
-        #     dtypes:
-        #       exclude:
-        #         - name: bool
-        #         - name: float16
-        #         - name: float32
-        # These tests exercise a wide range of PyTorch operations, including tensor manipulations, mathematical operations, and gradient scaling, across various data types.
-        # They are classified as xfail on the Spyre backend due to unsupported operations, data types, and memory formats, as well as missing features like deterministic paths and non-deterministic alerts.
-        # The most relevant Spyre capabilities include support for bfloat16, bool, float16, float32, and int64 data types, and a subset of operations that are fully supported across all these types. Limitations include unsupported complex half data types, non-contiguous memory formats, and missing deterministic paths for certain operations.
+
+        # ===========================================================================
+        # SKIP — does not engage the torch-spyre indirect-access layer
+        # ===========================================================================
+
+        # ---------------------------------------------------------------------------
+        # masked_fill — dense broadcast fill, NOT indirect-access scatter
+        # ---------------------------------------------------------------------------
         - names:
-            - TestDevicePrecision::test_advancedindex_mixed_cpu_devices
+            - TestTorchDeviceType::test_masked_fill
+            - TestTorchDeviceType::test_masked_fill_bool_tensor
+            - TestTorchDeviceType::test_masked_fill_mem_overlap
+          mode: skip
+
+        # ---------------------------------------------------------------------------
+        # Non-indirect tests from the former xfail block
+        # (memory format, interpolation alerts, grad scaling, RNG, non-indirect ops)
+        # ---------------------------------------------------------------------------
+        - names:
             - TestTorchDeviceType::test_addcmul
             - TestTorchDeviceType::test_assertRaisesRegex_ignore_msg_non_native_device
             - TestTorchDeviceType::test_clone_all_dtypes_and_devices
@@ -65,7 +201,6 @@ test_suite_config:
             - TestTorchDeviceType::test_deterministic_interpolate_bilinear
             - TestTorchDeviceType::test_deterministic_replication_pad2d
             - TestTorchDeviceType::test_exponential_no_zero
-            - TestTorchDeviceType::test_gather_backward_deterministic_path
             - TestTorchDeviceType::test_grad_scale_will_not_overflow
             - TestTorchDeviceType::test_grad_scaler_deprecated_warning
             - TestTorchDeviceType::test_grad_scaling_autocast
@@ -75,8 +210,6 @@ test_suite_config:
             - TestTorchDeviceType::test_invalid_shapes_grid_sampler
             - TestTorchDeviceType::test_lazy_clone_binary_op_no_materialize
             - TestTorchDeviceType::test_lazy_clone_view_materialize
-            - TestTorchDeviceType::test_masked_scatter_inplace_noncontiguous
-            - TestTorchDeviceType::test_masked_select_discontiguous
             - TestTorchDeviceType::test_memory_format_factory_like_functions_preserve
             - TestTorchDeviceType::test_memory_format_preserved_after_permute
             - TestTorchDeviceType::test_memory_format_propagation_rules
@@ -90,7 +223,6 @@ test_suite_config:
             - TestTorchDeviceType::test_nondeterministic_alert_AdaptiveMaxPool2d
             - TestTorchDeviceType::test_nondeterministic_alert_AvgPool3d
             - TestTorchDeviceType::test_nondeterministic_alert_CTCLoss
-            - TestTorchDeviceType::test_nondeterministic_alert_EmbeddingBag_max
             - TestTorchDeviceType::test_nondeterministic_alert_FractionalMaxPool2d
             - TestTorchDeviceType::test_nondeterministic_alert_FractionalMaxPool3d
             - TestTorchDeviceType::test_nondeterministic_alert_MaxPool3d
@@ -111,64 +243,23 @@ test_suite_config:
             - TestTorchDeviceType::test_nondeterministic_alert_interpolate_bilinear
             - TestTorchDeviceType::test_nondeterministic_alert_interpolate_linear
             - TestTorchDeviceType::test_nondeterministic_alert_interpolate_trilinear
-            - TestTorchDeviceType::test_nondeterministic_alert_put_accumulate
             - TestTorchDeviceType::test_nondeterministic_resize_quantized
             - TestTorchDeviceType::test_params_invalidated_with_grads_invalidated_and_graph_partition
             - TestTorchDeviceType::test_params_invalidated_with_grads_invalidated_between_unscale_and_step
             - TestTorchDeviceType::test_reduced_type_float_copy
-            - TestTorchDeviceType::test_scatter_add_non_unique_index
-            - TestTorchDeviceType::test_scatter_add_one_dim_deterministic
-            - TestTorchDeviceType::test_scatter_reduce_non_unique_index
-            - TestTorchDeviceType::test_scatter_reduce_operations_to_large_input
-            - TestTorchDeviceType::test_scatter_reduce_scalar
             - TestTorchDeviceType::test_storage_all_devices
             - TestTorchDeviceType::test_storage_meta_from_tensor
             - TestTorchDeviceType::test_where_scalar_handcrafted_values
             - TestTorchDeviceType::test_item
-          mode: xfail   # xfail: dxp_standalone not detected
-        # These tests exercise various tensor operations and dtypes, including clamp, copy_, diff, gradient, and put_accumulate.
-        # They are classified as xfail due to NotImplementedError and InductorError, indicating unsupported ops or dtypes.
-        # Relevant Spyre limitations include missing support for certain dtypes and ops, such as random_ and dxp_standalone.
-        - names:
-            - TestDevicePrecision::test_clamp
-            - TestTorchDeviceType::test_diff
-            - TestTorchDeviceType::test_diff_noncontig
-            - TestTorchDeviceType::test_put_accumulate
-          mode: skip  # xfail: NotImplementedError, torch._inductor.exc.InductorError
-        # These tests exercise tensor comparison and upsampling operations, respectively.
-        # They are classified as xfail due to AssertionErrors, indicating precision issues or memory limitations.
-        # The relevant Spyre limitations include precision discrepancies in tensor comparisons and memory allocation constraints.
-        - names:
-            - TestDevicePrecision::test_copy_broadcast
-            - TestTorchDeviceType::test_int64_upsample3d
-          mode: skip  # xfail: AssertionError
-        # These tests exercise various tensor operations and memory format transformations, including type conversions and non-contiguous memory handling.
-        # They are classified as xfail due to Spyre backend limitations in handling type conversions during tensor operations and unsupported memory formats.
-        # The most relevant Spyre capabilities are its support for contiguous memory format and its current lack of support for complex dtypes and non-contiguous memory operations.
-        - names:
-            - TestDevicePrecision::test_copy_noncontig
-            - TestTorchDeviceType::test_bool_tensor_value_change
-            - TestTorchDeviceType::test_check_tensor_all
-            - TestTorchDeviceType::test_check_tensor_internal
-            - TestTorchDeviceType::test_discontiguous_out_cumsum
-            - TestTorchDeviceType::test_gradient_type_promotion
-            - TestTorchDeviceType::test_hook_remove
-            - TestTorchDeviceType::test_memory_format_clone
-            - TestTorchDeviceType::test_memory_format_empty_like
-            - TestTorchDeviceType::test_memory_format_operators
-            - TestTorchDeviceType::test_memory_format_to
-            - TestTorchDeviceType::test_memory_format_type
-            - TestTorchDeviceType::test_scatter_add_to_large_input
-            - TestTorchDeviceType::test_scatter_to_large_input
-            - TestTorchDeviceType::test_untyped_storage_meta
-          mode: skip  # xfail: RuntimeError
-        # These tests exercise a variety of tensor operations and data types, including random number generation, cumulative operations, and tensor manipulation.
-        # They are classified as xfail on the Spyre backend due to missing or unimplemented operators, such as `aten::_efficientzerotensor`, `aten::set_.source_Storage`, and `aten::index_add.out`.
-        # The most relevant Spyre capabilities or limitations include the lack of support for certain tensor operations and data types, which are essential for these tests to pass.
+            - TestTorchDeviceType::test_cov
+          mode: skip
+
+        # ---------------------------------------------------------------------------
+        # NotImplementedError — non-indirect ops not yet on Spyre
+        # ---------------------------------------------------------------------------
         - names:
             - TestDevicePrecision::test_cuda_device_idx
             - TestDevicePrecision::test_device_serialization
-            - TestDevicePrecision::test_index_add_bfloat16
             - TestTorchDeviceType::test_bernoulli_p
             - TestTorchDeviceType::test_bernoulli_self
             - TestTorchDeviceType::test_bytes_to_scalar
@@ -182,42 +273,44 @@ test_suite_config:
             - TestTorchDeviceType::test_deepcopy_scalar
             - TestTorchDeviceType::test_dim_function_empty
             - TestTorchDeviceType::test_exponential
-            - TestTorchDeviceType::test_gather_backward_one_dim
             - TestTorchDeviceType::test_geometric
-            - TestTorchDeviceType::test_index_add_large_inputs
-            - TestTorchDeviceType::test_index_fill_mem_overlap
-            - TestTorchDeviceType::test_index_put_mem_overlap
             - TestTorchDeviceType::test_is_set_to
             - TestTorchDeviceType::test_log_normal
             - TestTorchDeviceType::test_logcumsumexp
-            - TestTorchDeviceType::test_masked_fill_bool_tensor
-            - TestTorchDeviceType::test_masked_fill_mem_overlap
-            - TestTorchDeviceType::test_masked_scatter_bool_tensor
-            - TestTorchDeviceType::test_masked_select
             - TestTorchDeviceType::test_pairwise_distance_empty
             - TestTorchDeviceType::test_pdist_empty
             - TestTorchDeviceType::test_pdist_norm_large
-            - TestTorchDeviceType::test_put
-            - TestTorchDeviceType::test_put_empty
             - TestTorchDeviceType::test_scalar_check
-            - TestTorchDeviceType::test_scatter_add_bool
-            - TestTorchDeviceType::test_scatter_bool
             - TestTorchDeviceType::test_set_storage
             - TestTorchDeviceType::test_storage
             - TestTorchDeviceType::test_sync_warning
-            - TestTorchDeviceType::test_take
-            - TestTorchDeviceType::test_take_empty
             - TestTorchDeviceType::test_tensor_shape_empty
-          mode: skip  # xfail: NotImplementedError
-        # These tests exercise various broadcasting operations across different tensor operations and data types.
-        # They are classified as xfail due to missing or unsupported operators and file access errors on the Spyre backend.
-        # Relevant Spyre limitations include missing support for certain tensor operations and file system dependencies.
+          mode: skip
+
+        # ---------------------------------------------------------------------------
+        # RuntimeError / AssertionError — non-indirect
+        # ---------------------------------------------------------------------------
         - names:
-            - TestTorchDeviceType::test_broadcast
-          mode: skip  # xfail: NotImplementedError, RuntimeError, torch._inductor.exc.InductorError
-        # These tests exercise a variety of operations and tensor behaviors, including non-contiguous tensors, gradient scaling, and cumulative operations.
-        # They are classified as xfail due to unsupported operations, missing features, or errors related to the Spyre backend.
-        # Relevant Spyre limitations include unsupported mutation operations, missing standalone executables, and unsupported data formats.
+            - TestDevicePrecision::test_copy_broadcast
+            - TestTorchDeviceType::test_int64_upsample3d
+            - TestDevicePrecision::test_copy_noncontig
+            - TestTorchDeviceType::test_bool_tensor_value_change
+            - TestTorchDeviceType::test_check_tensor_all
+            - TestTorchDeviceType::test_check_tensor_internal
+            - TestTorchDeviceType::test_discontiguous_out_cumsum
+            - TestTorchDeviceType::test_gradient_type_promotion
+            - TestTorchDeviceType::test_hook_remove
+            - TestTorchDeviceType::test_memory_format_clone
+            - TestTorchDeviceType::test_memory_format_empty_like
+            - TestTorchDeviceType::test_memory_format_operators
+            - TestTorchDeviceType::test_memory_format_to
+            - TestTorchDeviceType::test_memory_format_type
+            - TestTorchDeviceType::test_untyped_storage_meta
+          mode: skip
+
+        # ---------------------------------------------------------------------------
+        # InductorError — non-indirect ops
+        # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_cdist_cuda_backward
             - TestTorchDeviceType::test_cdist_euclidean_large
@@ -227,7 +320,6 @@ test_suite_config:
             - TestTorchDeviceType::test_cdist_same_inputs
             - TestTorchDeviceType::test_copy_math_view
             - TestTorchDeviceType::test_corrcoef
-            - TestTorchDeviceType::test_cov
             - TestTorchDeviceType::test_cummax_discontiguous
             - TestTorchDeviceType::test_cummin_discontiguous
             - TestTorchDeviceType::test_deterministic_cumsum
@@ -240,45 +332,32 @@ test_suite_config:
             - TestTorchDeviceType::test_grad_scaling_state_dict
             - TestTorchDeviceType::test_large_cumprod
             - TestTorchDeviceType::test_large_cumsum
-            - TestTorchDeviceType::test_masked_scatter
             - TestTorchDeviceType::test_multinomial
             - TestTorchDeviceType::test_narrow_copy_non_contiguous
-            - TestTorchDeviceType::test_nondeterministic_alert_put
             - TestTorchDeviceType::test_pickle_gradscaler
-            - TestTorchDeviceType::test_repeat_interleave
             - TestTorchDeviceType::test_strides_propagation
             - TestTorchDeviceType::test_tolist_with_grad
-          mode: skip  # xfail: torch._inductor.exc.InductorError
-        # These tests exercise the `empty` operation across various dtypes, including unsupported ones like `bfloat16` and `int64`.
-        # They are classified as `xfail` due to Spyre's lack of support for certain dtypes and operations like `aten::isnan`.
-        # Relevant Spyre limitations include unsupported dtypes and operations, as well as handling of large constants.
+            - TestTorchDeviceType::test_diff
+            - TestTorchDeviceType::test_diff_noncontig
+            - TestDevicePrecision::test_clamp
+          mode: skip
+
+        # ---------------------------------------------------------------------------
+        # Storage / meta / deterministic
+        # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_deterministic_empty
-          mode: skip  # xfail: NotImplementedError, torch._inductor.exc.InductorError
-        # These tests exercise deterministic resizing across various dtypes, including bfloat16, bool, float16, float32, and int64.
-        # They are classified as xfail due to the Spyre backend's lack of support for the 'aten::set_.source_Storage' operator.
-        # The primary limitation is the unimplemented operator, affecting dtype-specific tensor manipulations.
-        - names:
             - TestTorchDeviceType::test_deterministic_resize
-          mode: skip  # xfail: NotImplementedError
-        # These tests exercise tensor creation from storage across various dtypes.
-        # They are classified as xfail due to missing support for 'aten::random_.from' and shape determination issues.
-        # Relevant Spyre limitations include incomplete support for certain tensor operations and dtype-specific errors.
-        - names:
             - TestTorchDeviceType::test_tensor_from_storage
-          mode: skip  # xfail: NotImplementedError, ValueError
-        # These tests verify tensor storage types across various dtypes, including unsupported ones like int64.
-        # They are classified as xfail due to Spyre's lack of support for certain dtypes and ops, causing AssertionErrors and NotImplementedErrors.
-        # The primary limitation is Spyre's incomplete support for all dtypes and ops required by PyTorch's tensor storage tests.
-        - names:
             - TestTorchDeviceType::test_tensor_storage_type
-          mode: skip  # xfail: AssertionError, NotImplementedError
-        # These tests verify the behavior of typed storage metadata across various dtypes.
-        # They are classified as xfail due to consistent AssertionErrors indicating discrepancies in storage size.
-        # The relevant Spyre limitation is the inability to accurately compute storage metadata for certain dtypes.
-        - names:
             - TestTorchDeviceType::test_typed_storage_meta
-          mode: skip  # xfail: AssertionError
+          mode: skip
+
+        # ---------------------------------------------------------------------------
+        # General skip — does not engage the torch-spyre layer
+        # (RNG, storage lifecycle, pickle, serialization, size/shape, tensor creation,
+        #  memory format, copy/dtype, math ops, gradient scaling, cumulative ops, etc.)
+        # ---------------------------------------------------------------------------
         - names:
             - TestDevicePrecision::test_multidevice_serialization
             - TestDevicePrecision::test_type_conversions_same_device
@@ -301,8 +380,6 @@ test_suite_config:
             - TestTorchDeviceType::test_geometric_kstest
             - TestTorchDeviceType::test_grad_scaling_unscale
             - TestTorchDeviceType::test_lognormal_kstest
-            - TestTorchDeviceType::test_masked_fill
-            - TestTorchDeviceType::test_masked_scatter_large_tensor
             - TestTorchDeviceType::test_memory_format_cpu_and_cuda_ops
             - TestTorchDeviceType::test_module_share_memory
             - TestTorchDeviceType::test_multinomial_cpu
@@ -312,7 +389,6 @@ test_suite_config:
             - TestTorchDeviceType::test_normal_kstest
             - TestTorchDeviceType::test_nullary_op_mem_overlap
             - TestTorchDeviceType::test_pin_memory_from_constructor
-            - TestTorchDeviceType::test_scatter_zero_size_index
             - TestTorchDeviceType::test_serialization
             - TestTorchDeviceType::test_set_default_tensor_type_warnings
             - TestTorchDeviceType::test_skip_xla
@@ -378,10 +454,6 @@ test_suite_config:
             - TestTorch::test_get_cpu_capability
             - TestTorch::test_has_internal_overlap
             - TestTorch::test_has_storage
-            - TestTorch::test_index_add
-            - TestTorch::test_index_add_all_dtypes
-            - TestTorch::test_index_add_cornercase
-            - TestTorch::test_index_add_correctness
             - TestTorch::test_invalid_arg_error_handling
             - TestTorch::test_invalid_generator_raises
             - TestTorch::test_is_nonzero
@@ -511,10 +583,10 @@ test_suite_config:
             - TestTorchDeviceType::test_copy_transpose_math_view
             - TestTorchDeviceType::test_cumsum
             - TestTorchDeviceType::test_gradient_all
-            - TestTorchDeviceType::test_copy_ # Deeptools incompatibility
-            - TestTorchDeviceType::test_gradient_extreme_cases # Deeptools incompatibility
-            - TestTorchDeviceType::test_gradient_spacing_list_length_error # Deeptools incompatibility
-            - TestTorchDeviceType::test_cdist_large # Deeptools incompatibility
+            - TestTorchDeviceType::test_copy_
+            - TestTorchDeviceType::test_gradient_extreme_cases
+            - TestTorchDeviceType::test_gradient_spacing_list_length_error
+            - TestTorchDeviceType::test_cdist_large
           mode: skip  # does not engage the torch-spyre layer
 
   global:
