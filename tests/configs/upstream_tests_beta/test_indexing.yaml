@@ -55,7 +55,7 @@ test_suite_config:
 
         # ---------------------------------------------------------------------------
         # Advanced (fancy) indexing with integer tensor indices
-        # aten::index.Tensor path; gather functionality scope.
+        # aten::index.Tensor path.
         # ---------------------------------------------------------------------------
         - names:
             - TestIndexing::test_advancedindex
@@ -70,9 +70,7 @@ test_suite_config:
 
         # ---------------------------------------------------------------------------
         # Boolean mask indexing (aten::index with bool / byte tensor)
-        # Lowers to nonzero() + index — dynamic shape (Mask-as-Compaction P2 per FRS).
-        # Classified mandatory_success: masked access is part of gather functionality
-        # scope; tests will start passing when P2 mask-compaction lands on Spyre.
+        # Lowers to nonzero() + index — dynamic shape.
         # ---------------------------------------------------------------------------
         - names:
             - TestIndexing::test_bool_indices
@@ -92,7 +90,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # aten::index_put / index_put_ — indirect write via tensor index (P0 per FRS)
+        # aten::index_put / index_put_ — indirect write via tensor index
         # Upstream dtype coverage:
         #   test_index_put_accumulate_large_tensor  no @dtypes — runs once
         #   test_index_put_src_datatype @dtypes(float16, float32, int8, int16, int32, int64, bfloat16)
@@ -117,7 +115,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # torch.index_reduce_ — scatter-reduce via index tensor (Reduction Engine P0)
+        # torch.index_reduce_ — scatter-reduce via index tensor
         # @parametrize("reduce", ["prod","amin","amax","mean"])
         # Upstream dtype coverage: @dtypes(*all_types_and(torch.half, torch.bfloat16))
         # Active after filter: float16, int64, bfloat16; excluded: float64, int8/16/32, uint8
@@ -128,8 +126,7 @@ test_suite_config:
 
         # ---------------------------------------------------------------------------
         # torch.index_copy / index_copy_ — indirect write at indexed positions
-        # aten.index_copy.out is an explicit CPU fallback (ops/fallbacks.py:246);
-        # tests validate the fallback path and the API contract.
+        # torch.index_copy / index_copy_ — indirect write at indexed positions
         # ---------------------------------------------------------------------------
         - names:
             - TestIndexing::test_index_copy
@@ -139,7 +136,7 @@ test_suite_config:
 
         # ---------------------------------------------------------------------------
         # torch.index_fill / index_fill_ — fill values at indexed positions
-        # Not yet implemented on Spyre (Indirect Write Engine).
+        # Not yet implemented on Spyre.
         # Upstream dtype coverage:
         #   @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
         #   Active after filter: float16, int64, bfloat16, bool
@@ -174,8 +171,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # NumpyTests — boolean mask indexing (nonzero + index path; P2 per FRS)
-        # Classified mandatory_success: part of gather functionality scope.
+        # NumpyTests — boolean mask indexing (nonzero + index path)
         # ---------------------------------------------------------------------------
         - names:
             - NumpyTests::test_single_bool_index
@@ -223,7 +219,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # aten::index_put extended cases — indirect write (P0 per FRS)
+        # aten::index_put extended cases — indirect write
         # Upstream dtype coverage for _put_ tests:
         #   @dtypes(float16, float32, int8, int16, int32, int64, bfloat16)
         #   Active after filter: float16, int64, bfloat16
@@ -236,7 +232,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # torch.index_add — indirect accumulation via index tensor (Reduction Engine P0)
+        # torch.index_add — indirect accumulation via index tensor
         # Not yet implemented on Spyre.
         # Upstream dtype coverage: @dtypes(*all_types_and(torch.half, torch.bfloat16))
         # Active after filter: float16, int64, bfloat16

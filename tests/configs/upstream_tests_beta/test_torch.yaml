@@ -7,9 +7,6 @@ test_suite_config:
 
         # ===========================================================================
         # INDIRECT ACCESS — MANDATORY_SUCCESS
-        # All tests below exercise gather / scatter / index / embedding / mask
-        # indirect access operations. Classified mandatory_success so that CI tracks
-        # every gather-functionality case regardless of current Spyre support.
         # ===========================================================================
 
         # ---------------------------------------------------------------------------
@@ -40,11 +37,11 @@ test_suite_config:
             - TestTorch::test_index_copy_neg_dim
             - TestTorch::test_index_fill_neg_dim
             - TestTorch::test_index_add_neg_dim
+            - TestTorch::test_scatter_neg_dim
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # torch.scatter / scatter_ — Indirect Write Engine (P0)
-        # Not yet wired on Spyre (spyre_kernel.py:809 TODO).
+        # torch.scatter / scatter_
         # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_scatter_to_large_input
@@ -55,7 +52,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # scatter_add / scatter_reduce — Reduction Engine (P0)
+        # scatter_add / scatter_reduce
         # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_scatter_add_non_unique_index
@@ -66,8 +63,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # masked_scatter / masked_scatter_ — Mask-as-Compaction (P2 per FRS)
-        # Exercises indirect write via boolean mask.
+        # masked_scatter / masked_scatter_
         # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_masked_scatter
@@ -77,7 +73,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # masked_select — boolean-controlled indirect read (Mask-as-Compaction P2)
+        # masked_select
         # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_masked_select
@@ -85,7 +81,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # put_ / put — indexed write (scatter variant; Indirect Write Engine P0)
+        # put_ / put — indexed write
         # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_put
@@ -96,15 +92,14 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # repeat_interleave — decomposes to gather/expand (GQA/MQA KV-head expansion
-        # in Llama-3, Mistral, Qwen2; FRS §10 Additional Operators)
+        # repeat_interleave
         # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_repeat_interleave
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # index_add family — Reduction Engine (P0)
+        # index_add family
         # ---------------------------------------------------------------------------
         - names:
             - TestTorch::test_index_add
@@ -124,7 +119,7 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # EmbeddingBag nondeterministic alert — embedding = Indirect Read Engine
+        # EmbeddingBag nondeterministic alert
         # ---------------------------------------------------------------------------
         - names:
             - TestTorchDeviceType::test_nondeterministic_alert_EmbeddingBag_max
@@ -163,6 +158,8 @@ test_suite_config:
             - TestTorchDeviceType::test_storage_use_count
             - TestTorchDeviceType::test_ternary_op_mem_overlap
             - TestTorch::test_normal_shape
+            - TestBasicVitalSigns::test_basic_vitals_read_write
+            - TestBasicVitalSigns::test_dataloader_vitals
           mode: mandatory_success
 
         # test_addcdiv: float32 excluded (InductorError on unexpected args)

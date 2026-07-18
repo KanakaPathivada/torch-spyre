@@ -4,9 +4,9 @@ test_suite_config:
       unlisted_test_mode: skip
       tests:
         # ---------------------------------------------------------------------------
-        # torch.gather — Indirect Read Engine (P0)
+        # torch.gather
         # Reads src values at positions specified by an index tensor.
-        # All 4 gather variants pass on Spyre today (GATHER_OP_SPEC path).
+        # All 4 gather variants pass on Spyre today.
         #
         # Upstream dtype coverage:
         #   test_gather             @dtypes(float32, complex64)             — complex64 excluded
@@ -26,10 +26,9 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # torch.scatter / torch.scatter_ — Indirect Write Engine (P0)
+        # torch.scatter / torch.scatter_
         # Writes src values into self at positions specified by an index tensor.
-        # Not yet wired on Spyre (spyre_kernel.py:809 TODO — scatter codegen pending).
-        # Classified mandatory_success: tracks when scatter write lands on Spyre.
+        # Not yet implemented on Spyre — classified mandatory_success to track when it lands.
         #
         # Upstream dtype coverage:
         #   test_scatter_           @dtypes(float16, float32, complex64)        — complex64 excluded
@@ -46,9 +45,9 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # torch.scatter_add / torch.scatter_add_ — Reduction Engine (P0)
+        # torch.scatter_add / torch.scatter_add_
         # Accumulates src values into self at positions specified by an index tensor.
-        # Not yet implemented on Spyre. Classified mandatory_success: tracks Reduction Engine.
+        # Not yet implemented on Spyre — classified mandatory_success to track when it lands.
         #
         # Upstream dtype coverage:
         #   test_scatter_add_                                    @dtypes(float16, float32, complex64) — complex64 excluded
@@ -62,9 +61,9 @@ test_suite_config:
           mode: mandatory_success
 
         # ---------------------------------------------------------------------------
-        # torch.scatter_reduce / torch.scatter_reduce_ — Reduction Engine (P0)
+        # torch.scatter_reduce / torch.scatter_reduce_
         # Reduce-mode scatter: sum, prod, mean, amax, amin.
-        # Not yet implemented on Spyre. Classified mandatory_success: tracks Reduction Engine.
+        # Not yet implemented on Spyre — classified mandatory_success to track when it lands.
         #
         # Upstream dtype coverage (excluded dtypes noted; active dtypes from supported_dtypes):
         #   test_scatter_reduce_sum   all except bool       — float16, float32, int64, bfloat16

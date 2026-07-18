@@ -5,17 +5,12 @@ test_suite_config:
       unlisted_test_mode: skip
       tests:
         # ===========================================================================
-        # Embedding lookup = Indirect Read Engine (P0 per FRS).
-        # All tests that exercise embedding/EmbeddingBag operations on Spyre device
-        # are classified mandatory_success regardless of current Spyre support.
-        # CPU-only factory / weight-management tests are skip (do not engage
-        # the torch-spyre indirect-access layer).
+        # Embedding / EmbeddingBag — mandatory_success
+        # CPU-only factory / weight-management tests are skip.
         # ===========================================================================
 
         # ---------------------------------------------------------------------------
-        # Embedding device tests — mandatory_success (currently passing on Spyre)
-        # aten.embedding.default is an explicit CPU fallback (ops/fallbacks.py:237);
-        # these tests validate the fallback path and embedding API contract.
+        # Embedding device tests — mandatory_success
         # ---------------------------------------------------------------------------
         - names:
             - TestEmbeddingNN::test_move_sparse_half_embedding
@@ -27,8 +22,6 @@ test_suite_config:
 
         # ---------------------------------------------------------------------------
         # EmbeddingBag device operations — mandatory_success
-        # EmbeddingBag = embedding lookup (Indirect Read Engine).
-        # Tracks when F.embedding_bag lands on Spyre.
         # ---------------------------------------------------------------------------
         - names:
             - TestEmbeddingNNDeviceType::test_EmbeddingBag_empty_per_sample_weights_and_offsets
