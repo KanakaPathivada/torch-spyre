@@ -84,6 +84,15 @@ test_suite_config:
       - name: float16
       - name: float32
       - name: int64
+      # -----------------------------------------------------------------------
+      # Excluded dtypes — present in upstream @dtypes but NOT yet supported on Spyre.
+      # Applies to EmbeddingBag tests parametrized with product((torch.int, torch.long),
+      #   (torch.float, torch.double)) and tests with @dtypes(torch.float32, torch.float64):
+      #   test_EmbeddingBag_*, test_embedding_bag_device, test_embedding_bag_non_contiguous_weight,
+      #   test_embedding_bag_1D_padding_idx, test_embedding_bag_2D_padding_idx
+      # -----------------------------------------------------------------------
+      # - name: float64    # reason: Spyre maximum floating-point precision is float32.
+      # - name: int32      # reason: 32-bit integer ops not supported on Spyre.
     supported_ops:
       - name: _scaled_dot_product_fused_attention_overrideable
         dtypes:

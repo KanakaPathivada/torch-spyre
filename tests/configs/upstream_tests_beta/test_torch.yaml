@@ -544,6 +544,21 @@ test_suite_config:
       - name: float16
       - name: float32
       - name: int64
+      # -----------------------------------------------------------------------
+      # Excluded dtypes — present in upstream @dtypes but NOT yet supported on Spyre.
+      # Applies to indirect access tests that use all_types_and_complex_and(...):
+      #   test_take, test_put, test_put_accumulate, test_masked_scatter,
+      #   test_masked_select, test_scatter_reduce_non_unique_index,
+      #   test_scatter_reduce_operations_to_large_input, test_scatter_reduce_scalar,
+      #   test_scatter_add_one_dim_deterministic (torch.int = int32 excluded)
+      # -----------------------------------------------------------------------
+      # - name: float64    # reason: Spyre maximum floating-point precision is float32.
+      # - name: int8       # reason: 8-bit integer ops not supported on Spyre.
+      # - name: int16      # reason: 16-bit integer ops not supported on Spyre.
+      # - name: int32      # reason: 32-bit integer ops not supported on Spyre.
+      # - name: uint8      # reason: unsigned integer ops not supported on Spyre.
+      # - name: complex64  # reason: complex arithmetic not supported on Spyre.
+      # - name: complex128 # reason: complex arithmetic not supported on Spyre.
     supported_ops:
       - name: _scaled_dot_product_fused_attention_overrideable
         dtypes:
