@@ -72,12 +72,26 @@ test_suite_config:
             - TestTorchDeviceType::test_nondeterministic_alert_put_accumulate
             - TestTorchDeviceType::test_repeat_interleave
             - TestDevicePrecision::test_index_add_bfloat16
-            - TestTorchDeviceType::test_index_add_large_inputs
             - TestTorchDeviceType::test_index_fill_mem_overlap
             - TestTorchDeviceType::test_index_put_mem_overlap
             - TestDevicePrecision::test_advancedindex_mixed_cpu_devices
             - TestTorchDeviceType::test_nondeterministic_alert_EmbeddingBag_max
           mode: mandatory_success
+        # ---------------------------------------------------------------------------
+        # torch.index_add_ on very large tensors — skip entirely to avoid CI hang.
+        # Root cause: aten::index_add.out is not registered for the Spyre backend.
+        # The test does NOT fail fast — it first runs a 524,288-iteration Python
+        # reference loop (32 × 16,384 steps) where every iteration calls .item()
+        # for a synchronous device-to-host scalar transfer, consuming ~19 minutes
+        # before the missing op is even reached.
+        # Tensor sizes: output [1, 32, 16384, 6144] bfloat16 ≈ 6 GB on device.
+        # Observed wall-clock: 1145 s (run N), 890 s (run N-1) — worsening each run.
+        # Use mode: skip (not xfail) so CI does not wait for the timeout at all.
+        # Remove this entry once aten::index_add.out is implemented on Spyre.
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestTorchDeviceType::test_index_add_large_inputs
+          mode: skip
         # ---------------------------------------------------------------------------
         # Gather backward — skip (backward / autograd not supported on Spyre)
         # ---------------------------------------------------------------------------
@@ -94,24 +108,18 @@ test_suite_config:
             dtypes:
               exclude:
                 - name: float32
-        # # These tests exercise tensor operations with various dtypes, including unsupported ones like float8_e4m3fn and float8_e5m2fnuz.
-        # # They are classified as mandatory_success because the Spyre backend must support all listed dtypes and ops for full compatibility.
-        # # The most relevant Spyre limitations are the lack of support for certain dtypes and the unimplemented "mul_cpu_reduced_float" op.
-        # - names:
-        #     - TestTorchDeviceType::test_item
-        #   mode: mandatory_success
-        #   edits:
-        #     dtypes:
-        #       exclude:
-        #         - name: bool
-        #         - name: float16
-        #         - name: float32
+        # These tests validate tensor item() across all supported dtypes and error-message
+        # handling for non-native device operations. Both pass on Spyre across all supported
+        # dtypes (bfloat16, bool, float16, float32, int64); classified as mandatory_success.
+        - names:
+            - TestTorchDeviceType::test_assertRaisesRegex_ignore_msg_non_native_device
+            - TestTorchDeviceType::test_item
+          mode: mandatory_success
         # These tests exercise a wide range of PyTorch operations, including tensor manipulations, mathematical operations, and gradient scaling, across various data types.
         # They are classified as xfail on the Spyre backend due to unsupported operations, data types, and memory formats, as well as missing features like deterministic paths and non-deterministic alerts.
         # The most relevant Spyre capabilities include support for bfloat16, bool, float16, float32, and int64 data types, and a subset of operations that are fully supported across all these types. Limitations include unsupported complex half data types, non-contiguous memory formats, and missing deterministic paths for certain operations.
         - names:
             - TestTorchDeviceType::test_addcmul
-            - TestTorchDeviceType::test_assertRaisesRegex_ignore_msg_non_native_device
             - TestTorchDeviceType::test_clone_all_dtypes_and_devices
             - TestTorchDeviceType::test_complex_half_experimental_warning
             - TestTorchDeviceType::test_conv_transposed_backward_agnostic_to_memory_format
@@ -168,7 +176,6 @@ test_suite_config:
             - TestTorchDeviceType::test_storage_all_devices
             - TestTorchDeviceType::test_storage_meta_from_tensor
             - TestTorchDeviceType::test_where_scalar_handcrafted_values
-            - TestTorchDeviceType::test_item
           mode: xfail   # xfail: dxp_standalone not detected
         # These tests exercise various tensor operations and dtypes, including clamp, copy_, diff, gradient, and put_accumulate.
         # They are classified as xfail due to NotImplementedError and InductorError, indicating unsupported ops or dtypes.
