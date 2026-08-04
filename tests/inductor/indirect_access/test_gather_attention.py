@@ -22,7 +22,8 @@ import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from utils_inductor import cached_randn, compare_with_cpu
+from utils_inductor import cached_randn  # noqa: E402
+from conftest import compare_mode  # noqa: E402
 
 _ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 _ATOL_F16 = 1e-2
@@ -30,6 +31,7 @@ _ATOL_BF16 = 2e-2
 _ATOL_SDPA = 2e-2
 
 
+@pytest.mark.parametrize("execution_mode", ["eager", "compiled"])
 class TestGatherPagedAttentionAndSDPA:
     """Paged KV cache gather integrated with SDPA: MHA/GQA/MQA decode and prefill, causal mask, attention bias, multi-core, LX planning, chunked prefill, RoPE+attention, and speculative verification."""
 
@@ -47,7 +49,7 @@ class TestGatherPagedAttentionAndSDPA:
 
     # ------------------------------------------------------------------
 
-    def test_sdpa_paged_decode_basic(self):
+    def test_sdpa_paged_decode_basic(self, execution_mode):
         """Single-token decode: gather 32 KV slots from (512,8,64) pool → SDPA output."""
         pool, H, D = 512, 8, 64
         k_cache = cached_randn(
@@ -64,11 +66,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_paged_prefill_full_context(self):
+    def test_sdpa_paged_prefill_full_context(self, execution_mode):
         """Prefill: gather 64 slots for context → SDPA self-attention over full context."""
         pool, H, D, Lq = 512, 8, 64, 64
         k_cache = cached_randn(
@@ -85,11 +94,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v, is_causal=True)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_gqa_32q_8kv(self):
+    def test_sdpa_gqa_32q_8kv(self, execution_mode):
         """GQA: 32 Q heads, 8 KV heads (group=4); gather KV → expand → SDPA."""
         pool, H_q, H_kv, D = 512, 32, 8, 64
         k_cache = cached_randn(
@@ -116,11 +132,18 @@ class TestGatherPagedAttentionAndSDPA:
             )
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_mqa_single_kv_head(self):
+    def test_sdpa_mqa_single_kv_head(self, execution_mode):
         """MQA: 8 Q heads, 1 KV head; paged gather + broadcast + SDPA."""
         pool, H_q, H_kv, D = 512, 8, 1, 64
         k_cache = cached_randn(
@@ -137,11 +160,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0).expand(1, H_q, 32, D)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_bfloat16_paged_decode(self):
+    def test_sdpa_bfloat16_paged_decode(self, execution_mode):
         """bfloat16 KV cache gather + SDPA; wordLength=2 throughout pipeline."""
         pool, H, D = 512, 8, 64
         k_cache = cached_randn(
@@ -158,11 +188,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_BF16, rtol=_ATOL_BF16
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_BF16,
+            rtol=_ATOL_BF16,
         )
 
-    def test_sdpa_causal_mask_prefill(self):
+    def test_sdpa_causal_mask_prefill(self, execution_mode):
         """Prefill with causal mask (is_causal=True); future positions must be masked."""
         pool, H, D, Lq = 512, 8, 64, 32
         k_cache = cached_randn(
@@ -179,11 +216,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v, is_causal=True)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_attention_bias_neg_inf_padding(self):
+    def test_sdpa_attention_bias_neg_inf_padding(self, execution_mode):
         """Attention bias with -inf for padded positions; gather + biased SDPA."""
         pool, H, D, Lq, Lk = 512, 8, 64, 4, 32
         k_cache = cached_randn(
@@ -202,11 +246,19 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, attn_bias, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            attn_bias,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_batch_decode_b4(self):
+    def test_sdpa_batch_decode_b4(self, execution_mode):
         """Batched decode B=4; each request gathers 8 slots → SDPA per request."""
         pool, H, D, Lk = 512, 8, 64, 8
         k_cache = cached_randn(
@@ -223,11 +275,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].reshape(4, Lk, H, D).permute(0, 2, 1, 3)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_sencores4_paged_decode(self):
+    def test_sdpa_sencores4_paged_decode(self, execution_mode):
         """SENCORES=4 with paged KV gather → SDPA; 4-core execution."""
         os.environ["SENCORES"] = "4"
         pool, H, D = 512, 8, 64
@@ -245,11 +304,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_sencores32_paged_prefill(self):
+    def test_sdpa_sencores32_paged_prefill(self, execution_mode):
         """SENCORES=32 with large prefill gather (128 slots) → SDPA."""
         os.environ["SENCORES"] = "32"
         pool, H, D, Lq = 1024, 8, 64, 128
@@ -267,11 +333,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v, is_causal=True)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_lx_planning_kv_gather(self):
+    def test_sdpa_lx_planning_kv_gather(self, execution_mode):
         """LX_PLANNING=1: index stays in HBM; gather + SDPA completes correctly."""
         os.environ["LX_PLANNING"] = "1"
         pool, H, D = 512, 8, 64
@@ -289,11 +362,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_2d_slot_index_batched_decode(self):
+    def test_sdpa_2d_slot_index_batched_decode(self, execution_mode):
         """2D slot_idxs (B=4, Lk=16): paged batch decode; each row is one request."""
         pool, H, D, B, Lk = 512, 8, 64, 4, 16
         k_cache = cached_randn(
@@ -310,11 +390,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(0, 2, 1, 3)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slot_idxs, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slot_idxs,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_rope_gather_then_attention(self):
+    def test_sdpa_rope_gather_then_attention(self, execution_mode):
         """Gather RoPE position embeddings → apply rotate-half → SDPA."""
         pool, H, D, Lk = 512, 8, 64, 32
         cos_sin = cached_randn(
@@ -347,7 +434,8 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[slots].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q_rot, k, v)
 
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             fn,
             cos_sin,
             k_cache,
@@ -359,7 +447,7 @@ class TestGatherPagedAttentionAndSDPA:
             rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_chunked_prefill_then_single_decode(self):
+    def test_sdpa_chunked_prefill_then_single_decode(self, execution_mode):
         """4 prefill chunks of 32 tokens each, then 1 single-token decode; all via paged gather."""
         pool, H, D = 512, 8, 64
         k_cache = cached_randn(
@@ -380,8 +468,15 @@ class TestGatherPagedAttentionAndSDPA:
                 v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
                 return F.scaled_dot_product_attention(q, k, v, is_causal=True)
 
-            compare_with_cpu(
-                fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+            compare_mode(
+                execution_mode,
+                fn,
+                k_cache,
+                v_cache,
+                q,
+                slots,
+                atol=_ATOL_SDPA,
+                rtol=_ATOL_SDPA,
             )
         q_dec = cached_randn(
             (1, H, 1, D), differentiation="attn14qd", dtype=torch.float16
@@ -393,11 +488,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn_dec, k_cache, v_cache, q_dec, dec_slot, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn_dec,
+            k_cache,
+            v_cache,
+            q_dec,
+            dec_slot,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_large_kv_pool_decode(self):
+    def test_sdpa_large_kv_pool_decode(self, execution_mode):
         """Large pool (1024 slots), 128-slot decode gather → SDPA correctness."""
         pool, H, D = 1024, 8, 64
         k_cache = cached_randn(
@@ -414,11 +516,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_separate_k_v_caches_different_shapes(self):
+    def test_sdpa_separate_k_v_caches_different_shapes(self, execution_mode):
         """Separate K (512,8,64) and V (512,8,128) cache shapes; both gathered → SDPA."""
         pool, H, Dk, Dv = 512, 8, 64, 128
         k_cache = cached_randn(
@@ -435,11 +544,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_output_then_linear_projection(self):
+    def test_sdpa_output_then_linear_projection(self, execution_mode):
         """Gather KV → SDPA → linear output projection; full attention block pattern."""
         pool, H, D = 512, 8, 64
         k_cache = cached_randn(
@@ -462,11 +578,19 @@ class TestGatherPagedAttentionAndSDPA:
             flat = attn_out.transpose(1, 2).reshape(B * Lq, H_ * D_)
             return flat @ out_proj
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, out_proj, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            out_proj,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_beam_reorder_then_attend(self):
+    def test_sdpa_beam_reorder_then_attend(self, execution_mode):
         """Beam search KV reorder via index_select → SDPA on reordered KV."""
         pool, H, D, B_beam = 512, 8, 64, 4
         k_cache = cached_randn(
@@ -488,11 +612,19 @@ class TestGatherPagedAttentionAndSDPA:
             v_reord = torch.index_select(v_flat, 0, beam_idx)
             return F.scaled_dot_product_attention(q, k_reord, v_reord)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, beam_idx, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            beam_idx,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_speculative_draft_verify(self):
+    def test_sdpa_speculative_draft_verify(self, execution_mode):
         """Speculative decode: draft tokens verified via SDPA score comparison."""
         pool, H, D, Ldraft = 512, 8, 64, 5
         k_cache = cached_randn(
@@ -511,11 +643,18 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q_draft, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q_draft,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )
 
-    def test_sdpa_4d_kv_layout_paged(self):
+    def test_sdpa_4d_kv_layout_paged(self, execution_mode):
         """4D KV cache (pool, H, blk, D) gathered at dim=0 → reshape → SDPA."""
         pool, H, blk, D = 128, 8, 4, 32
         k_cache = cached_randn(
@@ -532,6 +671,13 @@ class TestGatherPagedAttentionAndSDPA:
             v = v_cache[s].reshape(8 * blk, H, D).permute(1, 0, 2).unsqueeze(0)
             return F.scaled_dot_product_attention(q, k, v)
 
-        compare_with_cpu(
-            fn, k_cache, v_cache, q, slots, atol=_ATOL_SDPA, rtol=_ATOL_SDPA
+        compare_mode(
+            execution_mode,
+            fn,
+            k_cache,
+            v_cache,
+            q,
+            slots,
+            atol=_ATOL_SDPA,
+            rtol=_ATOL_SDPA,
         )

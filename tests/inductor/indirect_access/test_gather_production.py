@@ -21,7 +21,8 @@ import pytest
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from utils_inductor import DEVICE, cached_randn, compare_with_cpu
+from utils_inductor import DEVICE, cached_randn  # noqa: E402
+from conftest import compare_mode  # noqa: E402
 
 _ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 _ATOL_F16 = 1e-2
@@ -29,6 +30,7 @@ _ATOL_BF16 = 2e-2
 _ATOL_F32 = 1e-5
 
 
+@pytest.mark.parametrize("execution_mode", ["eager", "compiled"])
 class TestGatherProductionInferencePatterns:
     """MoE routing (random ids and topk-based), paged KV cache (diverse pool shapes, 2D slot index, block table), vLLM serving scenarios, FMS 4D/5D layouts, multi-layer transformer KV gather, and real model shapes (Granite/Llama/Mistral)."""
 
@@ -59,19 +61,22 @@ class TestGatherProductionInferencePatterns:
             ((256, 64, 32), 16, "1", torch.float16, _ATOL_F16, "moe08"),
         ],
     )
-    def test_moe_expert_routing(self, shape, P, sencores, dtype, atol, diff_key):
+    def test_moe_expert_routing(
+        self, execution_mode, shape, P, sencores, dtype, atol, diff_key
+    ):
         """MoE expert weight gather: expert_w[ids] across shapes, dtypes, and core counts."""
         os.environ["SENCORES"] = sencores
         w = cached_randn(shape, differentiation=diff_key, dtype=dtype)
         ids = torch.randint(0, shape[0], (P,), dtype=torch.int32)
-        compare_with_cpu(lambda w, i: w[i], w, ids, atol=atol, rtol=atol)
+        compare_mode(execution_mode, lambda w, i: w[i], w, ids, atol=atol, rtol=atol)
 
-    def test_moe_expert_aggregation(self):
+    def test_moe_expert_aggregation(self, execution_mode):
         """Route via gather then weighted-sum aggregation."""
         w = cached_randn((8, 64, 32), differentiation="moe09", dtype=torch.float16)
         ids = torch.randint(0, 8, (16,), dtype=torch.int32)
         scores = torch.randn(16, dtype=torch.float16).softmax(dim=0)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda w, i, s: (w[i] * s[:, None, None]).sum(dim=0),
             w,
             ids,
@@ -80,12 +85,13 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_moe_multi_layer(self):
+    def test_moe_multi_layer(self, execution_mode):
         """Two consecutive MoE routing layers; two GATHER_OP_SPECs."""
         w1 = cached_randn((8, 64, 32), differentiation="moe10a", dtype=torch.float16)
         w2 = cached_randn((8, 32, 16), differentiation="moe10b", dtype=torch.float16)
         ids = torch.randint(0, 8, (16,), dtype=torch.int32)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda w1, w2, i: (w1[i], w2[i]),
             w1,
             w2,
@@ -115,14 +121,16 @@ class TestGatherProductionInferencePatterns:
             ((128, 8, 16, 64), 64, torch.float16, _ATOL_F16, "1", "gpa23"),
         ],
     )
-    def test_paged_kv_pool_shape(self, kv_shape, P, dtype, atol, sencores, diff_key):
+    def test_paged_kv_pool_shape(
+        self, execution_mode, kv_shape, P, dtype, atol, sencores, diff_key
+    ):
         """Paged KV pool gather: kv[idx] across pool shapes, head configs, dtypes, cores."""
         os.environ["SENCORES"] = sencores
         kv = cached_randn(kv_shape, differentiation=diff_key, dtype=dtype)
         idx = torch.randint(0, kv_shape[0], (P,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=atol, rtol=atol)
+        compare_mode(execution_mode, lambda x, i: x[i], kv, idx, atol=atol, rtol=atol)
 
-    def test_paged_kv_chunked_prefill(self):
+    def test_paged_kv_chunked_prefill(self, execution_mode):
         """Chunked prefill: chunk_size=64; 4 separate gather calls."""
         kv = cached_randn((512, 8, 64), differentiation="gpa06", dtype=torch.float16)
 
@@ -131,31 +139,37 @@ class TestGatherProductionInferencePatterns:
 
         for chunk_start in range(0, 256, 64):
             idx = torch.randint(0, 512, (64,), dtype=torch.int32)
-            compare_with_cpu(fn, kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+            compare_mode(execution_mode, fn, kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_paged_kv_block_table(self):
+    def test_paged_kv_block_table(self, execution_mode):
         """Block table: slot = block_table[b, t] * page_size + offset."""
         kv = cached_randn((512, 8, 64), differentiation="gpa12", dtype=torch.float16)
         block_table = torch.randint(0, 32, (4, 8), dtype=torch.int32)
         page_size = 16
         flat_slots = (block_table * page_size).flatten() % 512
-        compare_with_cpu(
-            lambda x, i: x[i], kv, flat_slots, atol=_ATOL_F16, rtol=_ATOL_F16
+        compare_mode(
+            execution_mode,
+            lambda x, i: x[i],
+            kv,
+            flat_slots,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
         )
 
-    def test_paged_kv_page_reuse(self):
+    def test_paged_kv_page_reuse(self, execution_mode):
         """Prefix caching: same page referenced by multiple requests."""
         kv = cached_randn((512, 8, 64), differentiation="gpa13", dtype=torch.float16)
         shared_page = 42
         idx = torch.full((32,), shared_page, dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=0, rtol=0)
+        compare_mode(execution_mode, lambda x, i: x[i], kv, idx, atol=0, rtol=0)
 
-    def test_paged_kv_online_softmax(self):
+    def test_paged_kv_online_softmax(self, execution_mode):
         """K gather + attention scores + softmax."""
         kv = cached_randn((512, 8, 64), differentiation="gpa14", dtype=torch.float16)
         q = cached_randn((4, 8, 64), differentiation="gpa14q", dtype=torch.float16)
         idx = torch.randint(0, 512, (64,), dtype=torch.int32)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda kv, q, i: torch.softmax(
                 (q @ kv[i].transpose(-1, -2)).float(), dim=-1
             ).half(),
@@ -166,13 +180,14 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_paged_kv_full_attention(self):
+    def test_paged_kv_full_attention(self, execution_mode):
         """Full paged attention: gather K + V + attention + weighted V sum."""
         kv_k = cached_randn((512, 8, 64), differentiation="gpa15k", dtype=torch.float16)
         kv_v = cached_randn((512, 8, 64), differentiation="gpa15v", dtype=torch.float16)
         q = cached_randn((4, 8, 64), differentiation="gpa15q", dtype=torch.float16)
         idx = torch.randint(0, 512, (64,), dtype=torch.int32)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda k, v, q, i: (
                 torch.softmax((q @ k[i].transpose(-1, -2)).float() / 8.0, dim=-1).half()
                 @ v[i]
@@ -185,7 +200,7 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_paged_kv_named_dims(self):
+    def test_paged_kv_named_dims(self, execution_mode):
         """Named dims on KV and slot_idxs."""
         import torch_spyre._inductor.propagate_named_dims as _pnd
 
@@ -193,21 +208,26 @@ class TestGatherProductionInferencePatterns:
         idx = torch.randint(0, 512, (4 * 64,), dtype=torch.int32)
         _pnd.name_tensor_dims(kv, {"cache": 512, "H": 8, "D": 64})
         _pnd.name_tensor_dims(idx, {"slots": 4 * 64})
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_paged_kv_lx_planning(self):
+    def test_paged_kv_lx_planning(self, execution_mode):
         """LX_PLANNING=1; slot_idxs must stay in HBM not LX."""
         os.environ["LX_PLANNING"] = "1"
         kv = cached_randn((512, 8, 64), differentiation="gpa20", dtype=torch.float16)
         idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_paged_kv_two_gathers(self):
+    def test_paged_kv_two_gathers(self, execution_mode):
         """K and V gathered from same pool; two GATHER_OP_SPECs."""
         k = cached_randn((512, 8, 64), differentiation="gpa21k", dtype=torch.float16)
         v = cached_randn((512, 8, 64), differentiation="gpa21v", dtype=torch.float16)
         idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int32)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda k, v, i: (k[i], v[i]),
             k,
             v,
@@ -216,8 +236,10 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_paged_kv_dynamic_seqlen(self):
+    def test_paged_kv_dynamic_seqlen(self, execution_mode):
         """Dynamic Lk; compile once, run at Lk=32 and Lk=64."""
+        if execution_mode == "eager":
+            pytest.skip("compile-only test")
         kv = cached_randn((512, 8, 64), differentiation="gpa22", dtype=torch.float16)
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         for lk in (32, 64):
@@ -226,13 +248,14 @@ class TestGatherProductionInferencePatterns:
             result = fn(kv.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, expected, atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_paged_kv_5d_split_kv(self):
+    def test_paged_kv_5d_split_kv(self, execution_mode):
         """FMS 5D combined K+V along dim=1; gather + split downstream."""
         kv = cached_randn(
             (128, 2, 8, 16, 64), differentiation="gpa24", dtype=torch.float16
         )
         idx = torch.randint(0, 128, (4 * 16,), dtype=torch.int32)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda x, i: torch.unbind(x[i], dim=1),
             kv,
             idx,
@@ -240,7 +263,7 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_paged_kv_sentinel_boundary(self):
+    def test_paged_kv_sentinel_boundary(self, execution_mode):
         """Page boundary values; no off-by-one at slot boundaries."""
         kv = cached_randn((512, 8, 64), differentiation="gpa25", dtype=torch.float16)
         page_size = 16
@@ -248,19 +271,26 @@ class TestGatherProductionInferencePatterns:
             [page_size - 1, page_size, 2 * page_size - 1, 2 * page_size],
             dtype=torch.int32,
         )
-        compare_with_cpu(lambda x, i: x[i], kv, boundary_slots, atol=0, rtol=0)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, boundary_slots, atol=0, rtol=0
+        )
 
     # ------------------------------------------------------------------
 
-    def test_vllm_token_embedding(self):
+    def test_vllm_token_embedding(self, execution_mode):
         """On-device token embedding lookup; GATHER_OP_SPEC."""
         vocab = cached_randn((512, 128), differentiation="vllm01", dtype=torch.float16)
         token_ids = torch.randint(0, 512, (128,), dtype=torch.int64)
-        compare_with_cpu(
-            lambda v, i: v[i], vocab, token_ids, atol=_ATOL_F16, rtol=_ATOL_F16
+        compare_mode(
+            execution_mode,
+            lambda v, i: v[i],
+            vocab,
+            token_ids,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
         )
 
-    def test_vllm_kv_cache_write(self):
+    def test_vllm_kv_cache_write(self, execution_mode):
         """KV cache write via index_put; written positions match."""
         cache = torch.zeros(1, 8, 128, 64, dtype=torch.float16)
         key = torch.randn(1, 8, 11, 64, dtype=torch.float16)
@@ -269,54 +299,71 @@ class TestGatherProductionInferencePatterns:
         def fn(cache, key, pos):
             return cache.index_copy(2, pos, key[:, :, :11, :])
 
-        compare_with_cpu(fn, cache, key, pos, atol=0, rtol=0)
+        compare_mode(execution_mode, fn, cache, key, pos, atol=0, rtol=0)
 
-    def test_vllm_kv_prefill_read(self):
+    def test_vllm_kv_prefill_read(self, execution_mode):
         """Prefill KV read (sequential contiguous slots)."""
         kv = cached_randn((512, 8, 64), differentiation="vllm03", dtype=torch.float16)
         idx = torch.arange(256, dtype=torch.int32) % 512
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_vllm_kv_decode_read(self):
+    def test_vllm_kv_decode_read(self, execution_mode):
         """Decode via paged slot indices; B=12, Lk=1."""
         kv = cached_randn((512, 8, 64), differentiation="vllm04", dtype=torch.float16)
         idx = torch.randint(0, 512, (12,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_vllm_logit_extraction(self):
+    def test_vllm_logit_extraction(self, execution_mode):
         """Decode-step last-token logit extraction."""
         logits = cached_randn(
             (12, 4, 512), differentiation="vllm05", dtype=torch.float16
         )
-        compare_with_cpu(lambda x: x[:, -1, :], logits, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode,
+            lambda x: x[:, -1, :],
+            logits,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
 
-    def test_vllm_batch_variable(self):
+    def test_vllm_batch_variable(self, execution_mode):
         """Ragged-batch: per-request variable active lengths."""
         kv = cached_randn((512, 8, 64), differentiation="vllm06", dtype=torch.float16)
         idx = torch.randint(0, 512, (48,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_vllm_4d_kv_layout(self):
+    def test_vllm_4d_kv_layout(self, execution_mode):
         """vLLM native 4D KV layout (num_blocks, block_sz, kv_h, head_d)."""
         kv = cached_randn(
             (64, 16, 8, 64), differentiation="vllm07", dtype=torch.float16
         )
         idx = torch.randint(0, 64, (4 * 16,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_vllm_prefill_decode_combined(self):
+    def test_vllm_prefill_decode_combined(self, execution_mode):
         """Combined prefill+decode batch in one gather call."""
         kv = cached_randn((512, 8, 64), differentiation="vllm08", dtype=torch.float16)
         idx = torch.randint(0, 512, (128 + 4,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_vllm_rope_position_lookup(self):
+    def test_vllm_rope_position_lookup(self, execution_mode):
         """RoPE position cache; index_select → GATHER_OP_SPEC."""
         cos_sin = cached_randn(
             (4096, 128), differentiation="vllm09", dtype=torch.float16
         )
         pos = torch.randint(0, 4096, (128,), dtype=torch.int64)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda c, p: torch.index_select(c, 0, p),
             cos_sin,
             pos,
@@ -324,13 +371,14 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_vllm_beam_search_reorder(self):
+    def test_vllm_beam_search_reorder(self, execution_mode):
         """Beam search KV reordering via index_select at batch dim."""
         past_kv = cached_randn(
             (4, 32, 8, 64), differentiation="vllm10", dtype=torch.float16
         )
         beam_idx = torch.tensor([0, 1, 2, 3], dtype=torch.int64)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda x, i: torch.index_select(x, 0, i),
             past_kv,
             beam_idx,
@@ -338,7 +386,7 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_vllm_llama31_8b(self):
+    def test_vllm_llama31_8b(self, execution_mode):
         """Llama-3.1-8B shapes; token emb + KV cache dual gather."""
         kv = cached_randn(
             (512, 8, 128), differentiation="vllm11kv", dtype=torch.float16
@@ -346,7 +394,8 @@ class TestGatherProductionInferencePatterns:
         emb = cached_randn((512, 128), differentiation="vllm11emb", dtype=torch.float16)
         slot_idx = torch.randint(0, 512, (32,), dtype=torch.int32)
         tok_idx = torch.randint(0, 512, (64,), dtype=torch.int64)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda kv, emb, si, ti: (kv[si], emb[ti]),
             kv,
             emb,
@@ -356,29 +405,36 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_vllm_mistral_small_24b(self):
+    def test_vllm_mistral_small_24b(self, execution_mode):
         """Mistral-Small-3.2-24B sliding-window KV gather."""
         kv = cached_randn((512, 16, 128), differentiation="vllm12", dtype=torch.float16)
         idx = torch.randint(0, 512, (4 * 64,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_vllm_granite_8b(self):
+    def test_vllm_granite_8b(self, execution_mode):
         """Granite-3.3-8b GQA (kv_heads=8, q_heads=32)."""
         kv = cached_randn((512, 8, 128), differentiation="vllm13", dtype=torch.float16)
         idx = torch.randint(0, 512, (4 * 64,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_vllm_continuous_batching(self):
+    def test_vllm_continuous_batching(self, execution_mode):
         """Continuous batching: B requests, variable active KV lengths."""
         kv = cached_randn((512, 8, 64), differentiation="vllm14", dtype=torch.float16)
         idx = torch.randint(0, 512, (96,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_vllm_speculative_decode(self):
+    def test_vllm_speculative_decode(self, execution_mode):
         """Speculative decode; gather target probs at draft positions."""
         probs = cached_randn((512, 64), differentiation="vllm15", dtype=torch.float16)
         draft_tokens = torch.randint(0, 64, (5,), dtype=torch.int64)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda p, i: torch.gather(
                 p[:5], 1, i.unsqueeze(0).expand(5, -1)
             ).diagonal(),
@@ -390,13 +446,14 @@ class TestGatherProductionInferencePatterns:
 
     # ------------------------------------------------------------------
 
-    def test_fms_5d_split_kv(self):
+    def test_fms_5d_split_kv(self, execution_mode):
         """FMS 5D combined K+V (pages,2,kv_h,page_sz,D); split after."""
         kv = cached_randn(
             (128, 2, 8, 16, 128), differentiation="fms02", dtype=torch.float16
         )
         idx = torch.randint(0, 128, (4 * 16,), dtype=torch.int32)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda x, i: torch.unbind(x[i], dim=1),
             kv,
             idx,
@@ -404,7 +461,7 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F16,
         )
 
-    def test_fms_named_dims(self):
+    def test_fms_named_dims(self, execution_mode):
         """Named dims on FMS layout (pages, kv_h, page_sz, D)."""
         import torch_spyre._inductor.propagate_named_dims as _pnd
 
@@ -414,7 +471,9 @@ class TestGatherProductionInferencePatterns:
         idx = torch.randint(0, 128, (4 * 16,), dtype=torch.int32)
         _pnd.name_tensor_dims(kv, {"pages": 128, "kv_h": 8, "page_sz": 16, "D": 128})
         _pnd.name_tensor_dims(idx, {"slots": 4 * 16})
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
     @pytest.mark.parametrize(
         "P,dtype,atol,sencores,diff_key",
@@ -427,12 +486,12 @@ class TestGatherProductionInferencePatterns:
             (4 * 64, torch.float16, _ATOL_F16, "32", "fms08"),
         ],
     )
-    def test_fms_4d_layout(self, P, dtype, atol, sencores, diff_key):
+    def test_fms_4d_layout(self, execution_mode, P, dtype, atol, sencores, diff_key):
         """FMS 4D KV (128,8,16,128) gather across dtypes, output sizes, and core counts."""
         os.environ["SENCORES"] = sencores
         kv = cached_randn((128, 8, 16, 128), differentiation=diff_key, dtype=dtype)
         idx = torch.randint(0, 128, (P,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=atol, rtol=atol)
+        compare_mode(execution_mode, lambda x, i: x[i], kv, idx, atol=atol, rtol=atol)
 
     # ------------------------------------------------------------------
 
@@ -447,29 +506,37 @@ class TestGatherProductionInferencePatterns:
             ((512, 8, 64), 41, "mdl09"),
         ],
     )
-    def test_model_kv_prefill_decode(self, kv_shape, P, diff_key):
+    def test_model_kv_prefill_decode(self, execution_mode, kv_shape, P, diff_key):
         """Model-specific KV gather at production prefill/decode sizes."""
         kv = cached_randn(kv_shape, differentiation=diff_key, dtype=torch.float16)
         idx = torch.randint(0, kv_shape[0], (P,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_masked_scatter_mistral_multimodal(self):
+    def test_masked_scatter_mistral_multimodal(self, execution_mode):
         """Mistral-Small multimodal: gather image token embeddings at mask positions."""
         image_features = cached_randn(
             (16, 128), differentiation="mdl06", dtype=torch.float16
         )
         idx = torch.arange(16, dtype=torch.int32)
-        compare_with_cpu(
-            lambda x, i: x[i], image_features, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        compare_mode(
+            execution_mode,
+            lambda x, i: x[i],
+            image_features,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
         )
 
-    def test_rope_index_select_float32(self):
+    def test_rope_index_select_float32(self, execution_mode):
         """SpyreRotaryEmbedding float32: cos_sin_cache.index_select(0, pos); 4-byte elements."""
         cos_sin = cached_randn(
             (4096, 128), differentiation="mdl07", dtype=torch.float32
         )
         pos = torch.randint(0, 4096, (128,), dtype=torch.int64)
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda c, p: torch.index_select(c, 0, p),
             cos_sin,
             pos,
@@ -477,45 +544,69 @@ class TestGatherProductionInferencePatterns:
             rtol=_ATOL_F32,
         )
 
-    def test_lm_head_logit_extraction(self):
+    def test_lm_head_logit_extraction(self, execution_mode):
         """Last-token logit extraction hidden[:, -1, :]."""
         hidden = cached_randn(
             (12, 4, 128), differentiation="mdl08", dtype=torch.float16
         )
-        compare_with_cpu(lambda h: h[:, -1, :], hidden, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode,
+            lambda h: h[:, -1, :],
+            hidden,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
 
-    def test_kv_cache_decode_growing(self):
+    def test_kv_cache_decode_growing(self, execution_mode):
         """Growing KV cache: 3 separate decode-step gathers at positions 0, 10, 100."""
         kv = cached_randn((512, 8, 64), differentiation="mdl10", dtype=torch.float16)
         for slot in [0, 10, 100]:
             idx = torch.tensor([slot], dtype=torch.int32)
-            compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+            compare_mode(
+                execution_mode,
+                lambda x, i: x[i],
+                kv,
+                idx,
+                atol=_ATOL_F16,
+                rtol=_ATOL_F16,
+            )
 
-    def test_attention_qkv_split(self):
+    def test_attention_qkv_split(self, execution_mode):
         """QKV split via tensor.split; no gather needed."""
         qkv = cached_randn((1, 4, 384), differentiation="mdl11", dtype=torch.float16)
         q_size, k_size, v_size = 128, 128, 128
-        compare_with_cpu(
+        compare_mode(
+            execution_mode,
             lambda x: torch.split(x, [q_size, k_size, v_size], dim=-1),
             qkv,
             atol=_ATOL_F16,
             rtol=_ATOL_F16,
         )
 
-    def test_token_unpadding(self):
+    def test_token_unpadding(self, execution_mode):
         """Packed token gather: each seq pos from flat packed buffer."""
         packed = cached_randn((64, 128), differentiation="mdl12", dtype=torch.float16)
         pos_ids = torch.randint(0, 64, (4, 16), dtype=torch.int64)
-        compare_with_cpu(
-            lambda p, i: p[i], packed, pos_ids, atol=_ATOL_F16, rtol=_ATOL_F16
+        compare_mode(
+            execution_mode,
+            lambda p, i: p[i],
+            packed,
+            pos_ids,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
         )
 
-    def test_token_repadding(self):
+    def test_token_repadding(self, execution_mode):
         """Token repadding: larger packed buffer (128,256) gathered at (8,32) batch positions."""
         packed = cached_randn((128, 256), differentiation="mdl13", dtype=torch.float16)
         pos_ids = torch.randint(0, 128, (8, 32), dtype=torch.int64)
-        compare_with_cpu(
-            lambda p, i: p[i], packed, pos_ids, atol=_ATOL_F16, rtol=_ATOL_F16
+        compare_mode(
+            execution_mode,
+            lambda p, i: p[i],
+            packed,
+            pos_ids,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
         )
 
     @pytest.mark.parametrize(
@@ -526,17 +617,24 @@ class TestGatherProductionInferencePatterns:
             ((512, 32, 128), (4, 32), "gpa29"),
         ],
     )
-    def test_paged_kv_2d_slot_index(self, kv_shape, idx_shape, diff_key):
+    def test_paged_kv_2d_slot_index(
+        self, execution_mode, kv_shape, idx_shape, diff_key
+    ):
         """Paged KV: 2D (B,Lk) slot_idxs into 3D cache — FRS paged gather pattern."""
         kv = cached_randn(kv_shape, differentiation=diff_key, dtype=torch.float16)
         slot_idxs = torch.randint(0, kv_shape[0], idx_shape, dtype=torch.int32)
-        compare_with_cpu(
-            lambda x, i: x[i], kv, slot_idxs, atol=_ATOL_F16, rtol=_ATOL_F16
+        compare_mode(
+            execution_mode,
+            lambda x, i: x[i],
+            kv,
+            slot_idxs,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
         )
 
     # ------------------------------------------------------------------
 
-    def test_topk_moe_routing_top1(self):
+    def test_topk_moe_routing_top1(self, execution_mode):
         """MoE top-1 routing: softmax → topk(1) → index → gather expert weights."""
         n_experts = 8
         expert_w = cached_randn(
@@ -554,9 +652,11 @@ class TestGatherProductionInferencePatterns:
             )
             return expert_w[ids]
 
-        compare_with_cpu(fn, expert_w, logits, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, fn, expert_w, logits, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_topk_moe_routing_top2(self):
+    def test_topk_moe_routing_top2(self, execution_mode):
         """MoE top-2 routing: topk(2) flattened → gather 2 experts per token."""
         n_experts = 8
         expert_w = cached_randn(
@@ -572,9 +672,11 @@ class TestGatherProductionInferencePatterns:
             )
             return expert_w[ids]
 
-        compare_with_cpu(fn, expert_w, logits, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, fn, expert_w, logits, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_topk_moe_weighted_routing(self):
+    def test_topk_moe_weighted_routing(self, execution_mode):
         """MoE top-2 weighted: topk scores × gathered expert outputs → weighted sum."""
         n_experts = 8
         expert_w = cached_randn(
@@ -591,9 +693,11 @@ class TestGatherProductionInferencePatterns:
             selected = expert_w[ids.flatten()].view(4, 2, 64)
             return (selected * weights.unsqueeze(-1)).sum(dim=1)
 
-        compare_with_cpu(fn, expert_w, logits, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, fn, expert_w, logits, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
-    def test_topk_speculative_candidate_embed(self):
+    def test_topk_speculative_candidate_embed(self, execution_mode):
         """Speculative decode: topk draft candidates → gather their token embeddings."""
         embed = cached_randn((512, 128), differentiation="topk04", dtype=torch.float16)
         scores = cached_randn((512,), differentiation="topk04s", dtype=torch.float16)
@@ -602,9 +706,9 @@ class TestGatherProductionInferencePatterns:
             candidate_ids = torch.topk(scores.float(), 16).indices.to(torch.int32)
             return embed[candidate_ids]
 
-        compare_with_cpu(fn, embed, scores, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(execution_mode, fn, embed, scores, atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_topk_beam_search_kv_reorder(self):
+    def test_topk_beam_search_kv_reorder(self, execution_mode):
         """Beam search: topk beam scores → gather KV rows for top beams."""
         kv = cached_randn((8, 8, 64), differentiation="topk05", dtype=torch.float16)
         beam_scores = cached_randn((8,), differentiation="topk05s", dtype=torch.float16)
@@ -613,11 +717,13 @@ class TestGatherProductionInferencePatterns:
             beam_ids = torch.topk(scores.float(), 4).indices.to(torch.int32)
             return kv[beam_ids]
 
-        compare_with_cpu(fn, kv, beam_scores, atol=_ATOL_F16, rtol=_ATOL_F16)
+        compare_mode(
+            execution_mode, fn, kv, beam_scores, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
 
     # ------------------------------------------------------------------
 
-    def test_multi_layer_shared_slot_index(self):
+    def test_multi_layer_shared_slot_index(self, execution_mode):
         """4 transformer layers; same slot_idxs reused with separate KV cache per layer."""
         pool, H, D = 256, 8, 64
         slot_idxs = torch.randint(0, pool, (32,), dtype=torch.int32)
@@ -628,7 +734,8 @@ class TestGatherProductionInferencePatterns:
             v = cached_randn(
                 (pool, H, D), differentiation=f"mlt01v{layer_id}", dtype=torch.float16
             )
-            compare_with_cpu(
+            compare_mode(
+                execution_mode,
                 lambda k, v, s: (k[s], v[s]),
                 k,
                 v,
@@ -637,17 +744,22 @@ class TestGatherProductionInferencePatterns:
                 rtol=_ATOL_F16,
             )
 
-    def test_multi_layer_growing_decode_history(self):
+    def test_multi_layer_growing_decode_history(self, execution_mode):
         """Decode grows: same KV cache read at 4 increasing history lengths across layers."""
         pool, H, D = 512, 8, 64
         kv = cached_randn((pool, H, D), differentiation="mlt02", dtype=torch.float16)
         for step in (1, 8, 32, 64):
             slot_idxs = torch.randint(0, pool, (step,), dtype=torch.int32)
-            compare_with_cpu(
-                lambda x, i: x[i], kv, slot_idxs, atol=_ATOL_F16, rtol=_ATOL_F16
+            compare_mode(
+                execution_mode,
+                lambda x, i: x[i],
+                kv,
+                slot_idxs,
+                atol=_ATOL_F16,
+                rtol=_ATOL_F16,
             )
 
-    def test_multi_layer_4d_kv_per_layer(self):
+    def test_multi_layer_4d_kv_per_layer(self, execution_mode):
         """4-layer 4D KV (pool, H, blk, D); per-layer gather at decode with unique tensors."""
         pool, H, blk, D = 64, 8, 4, 32
         for layer_id in range(4):
@@ -657,9 +769,16 @@ class TestGatherProductionInferencePatterns:
                 dtype=torch.float16,
             )
             idx = torch.randint(0, pool, (8,), dtype=torch.int32)
-            compare_with_cpu(lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+            compare_mode(
+                execution_mode,
+                lambda x, i: x[i],
+                kv,
+                idx,
+                atol=_ATOL_F16,
+                rtol=_ATOL_F16,
+            )
 
-    def test_multi_layer_bfloat16_kv(self):
+    def test_multi_layer_bfloat16_kv(self, execution_mode):
         """4 transformer layers; bfloat16 KV caches, same slot pattern per layer."""
         pool, H, D = 256, 8, 64
         slot_idxs = torch.randint(0, pool, (16,), dtype=torch.int32)
@@ -667,11 +786,16 @@ class TestGatherProductionInferencePatterns:
             kv = cached_randn(
                 (pool, H, D), differentiation=f"mlt04_{layer_id}", dtype=torch.bfloat16
             )
-            compare_with_cpu(
-                lambda x, i: x[i], kv, slot_idxs, atol=_ATOL_BF16, rtol=_ATOL_BF16
+            compare_mode(
+                execution_mode,
+                lambda x, i: x[i],
+                kv,
+                slot_idxs,
+                atol=_ATOL_BF16,
+                rtol=_ATOL_BF16,
             )
 
-    def test_multi_layer_parallel_k_v_per_layer(self):
+    def test_multi_layer_parallel_k_v_per_layer(self, execution_mode):
         """2 transformer layers; K and V gathered in parallel within each layer call."""
         pool, H, D = 256, 8, 64
         slot_idxs = torch.randint(0, pool, (32,), dtype=torch.int32)
@@ -682,7 +806,8 @@ class TestGatherProductionInferencePatterns:
             v = cached_randn(
                 (pool, H, D), differentiation=f"mlt05v{layer_id}", dtype=torch.float16
             )
-            compare_with_cpu(
+            compare_mode(
+                execution_mode,
                 lambda k, v, s: (k[s], v[s]),
                 k,
                 v,
@@ -691,9 +816,11 @@ class TestGatherProductionInferencePatterns:
                 rtol=_ATOL_F16,
             )
 
-    def test_float32_kv_cache_int32_index(self):
+    def test_float32_kv_cache_int32_index(self, execution_mode):
         """float32 3D KV pool (512,8,64) with int32 index; 4-byte element gather."""
         pool, H, D = 512, 8, 64
         kv = cached_randn((pool, H, D), differentiation="f32kv01", dtype=torch.float32)
         slots = torch.randint(0, pool, (32,), dtype=torch.int32)
-        compare_with_cpu(lambda x, i: x[i], kv, slots, atol=_ATOL_F32, rtol=_ATOL_F32)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, slots, atol=_ATOL_F32, rtol=_ATOL_F32
+        )
