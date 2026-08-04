@@ -25,6 +25,7 @@ import pytest
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from utils_inductor import compare_with_cpu  # noqa: E402
 
 _ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 
@@ -37,6 +38,23 @@ def env_gather():
     yield
     os.environ.pop(_ENABLE_FLAG, None)
     os.environ.pop("SENCORES", None)
+
+
+def compare_mode(execution_mode, fn, *args, atol=0.1, rtol=0.1):
+    """Run fn in exactly one execution mode and compare result with CPU.
+
+    Use with @pytest.mark.parametrize("execution_mode", ["eager", "compiled"])
+    so each mode becomes a separate test record — a failure in eager does not
+    prevent compiled from running and vice versa.
+    """
+    compare_with_cpu(
+        fn,
+        *args,
+        atol=atol,
+        rtol=rtol,
+        run_compile=(execution_mode == "compiled"),
+        run_eager=(execution_mode == "eager"),
+    )
 
 
 def compiled_code(fn, *args):
