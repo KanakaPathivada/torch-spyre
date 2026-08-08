@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import math
+import os
+import platform
 import pytest
 import unittest
 import torch
@@ -639,6 +641,46 @@ def _pattern_resolve(variant, args):
             (q, k, v),
         )
     raise ValueError(f"unknown transpose suite variant {variant}")
+
+
+# Large test_large_matmul shapes: on s390x/ppc64, live fp16 CPU GEMM can be
+# extremely slow (no optimized fp16 BLAS). Use fp32→fp16 CPU refs for these
+# shapes only. Keep in sync with PARAMS for ("test_large_matmul", ...).
+_LARGE_MATMUL_FP32_CPU_REF_SHAPES = {
+    ((2048, 2048), (2048, 65536)),  # 2d_M2048_K2048_N65536
+    ((2, 2, 2048, 2048), (2, 2, 2048, 65472)),  # 4d_B2_H2_M2048_K2048_N65472
+}
+
+# Cached once: platform.machine() is stable for the process.
+_ARCH_NEEDS_LARGE_MATMUL_FP32_CPU_REF = (
+    platform.machine().lower().startswith(("s390", "ppc"))
+)
+
+
+def _arch_needs_large_matmul_fp32_cpu_ref() -> bool:
+    return _ARCH_NEEDS_LARGE_MATMUL_FP32_CPU_REF
+
+
+def _is_large_matmul_fp32_cpu_ref_shape(a: torch.Tensor, b: torch.Tensor) -> bool:
+    return (tuple(a.shape), tuple(b.shape)) in _LARGE_MATMUL_FP32_CPU_REF_SHAPES
+
+
+def _build_large_matmul_fp32_cpu_refs(op, a: torch.Tensor, b: torch.Tensor) -> dict:
+    """Build compare_with_cpu kwargs: fp32 CPU matmul, cast to input dtype.
+
+    Used for large test_large_matmul shapes on s390x/ppc64 where live fp16 CPU
+    GEMM is extremely slow. Spyre still runs on the original fp16 tensors.
+    """
+    a32 = a.float()
+    b32 = b.float()
+    out_dtype = a.dtype
+    kwargs = {}
+    with torch.no_grad():
+        kwargs["cpu_eager_result"] = op(a32, b32).to(dtype=out_dtype)
+        if bool(os.getenv("TEST_COMPARE_CPU_COMPILE")):
+            out32 = _compile_and_run(op, (a32, b32), "cpu", compile=True)
+            kwargs["cpu_compile_result"] = out32.to(dtype=out_dtype)
+    return kwargs
 
 
 class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
@@ -4992,10 +5034,20 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
     # Increased mm test tolerance for splitk
     def test_mm_relaxed(self, op, a, b):
         K = b.shape[-2]
+        kwargs = {}
         if K > (128 // b.element_size()):  # multiple sticks
-            self.compare_with_cpu(op, a, b, atol=0.1, rtol=0.1)
-        else:  # single stick, no need to relax
-            self.compare_with_cpu(op, a, b)
+            kwargs.update(atol=0.1, rtol=0.1)
+
+        # Large matmul on s390x/ppc64: live fp16 CPU GEMM can be extremely slow
+        # (no optimized fp16 BLAS). Use fp32→fp16 CPU references for allow-listed
+        # shapes only; Spyre still executes on the original fp16 inputs.
+        if (
+            _arch_needs_large_matmul_fp32_cpu_ref()
+            and _is_large_matmul_fp32_cpu_ref_shape(a, b)
+        ):
+            kwargs.update(_build_large_matmul_fp32_cpu_refs(op, a, b))
+
+        self.compare_with_cpu(op, a, b, **kwargs)
 
     def test_mm_autocast_cpu(self, enabled, a, b):
         def fn(a, b):

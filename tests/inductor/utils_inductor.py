@@ -633,6 +633,8 @@ def compare_with_cpu(
     needs_device=False,
     cpu_compile=None,
     target=None,
+    cpu_eager_result=None,
+    cpu_compile_result=None,
     run_eager=True,
     run_compile=True,
     source_check=None,
@@ -655,6 +657,12 @@ def compare_with_cpu(
     Args:
         run_compile: Run the compiled path on Spyre.
         run_eager: Run the eager (non-compiled) path on Spyre.
+        cpu_eager_result: Optional precomputed CPU eager reference. When set,
+            skips live ``fn(*args)`` on CPU.
+        cpu_compile_result: Optional precomputed compiled-CPU reference. When
+            set and ``cpu_compile`` is True, skips live compiled CPU execution.
+            Useful when eager/compiled CPU ``fn(*args)`` is prohibitively slow
+            for large fp16 matmuls on some platforms (s390x/ppc64).
     """
     # if this flag is explicitly passed in by the test, use it
     if cpu_compile is None:
@@ -667,7 +675,8 @@ def compare_with_cpu(
             return args
         return [arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args]
 
-    cpu_result = fn(*get_args())
+    if cpu_eager_result is None:
+        cpu_eager_result = fn(*get_args())
 
     # Order: compiled first, then eager (matches prior [True, False] when both on).
     modes = tuple(
@@ -677,6 +686,12 @@ def compare_with_cpu(
     )
     if not modes:
         raise ValueError("At least one of run_compile or run_eager must be True")
+
+    # Build compiled-CPU reference once (not once per Spyre mode).
+    if cpu_compile and cpu_compile_result is None:
+        cpu_compile_result = _compile_and_run(
+            fn, get_args(), "cpu", needs_device=needs_device, compile=True
+        )
 
     for compiled in modes:
         mode = "compiled" if compiled else "eager"
@@ -694,16 +709,13 @@ def compare_with_cpu(
         )
 
         _assert_results_close(
-            spyre_result, cpu_result, atol, rtol, f"{mode} spyre <-> cpu"
+            spyre_result, cpu_eager_result, atol, rtol, f"{mode} spyre <-> cpu"
         )
 
         if cpu_compile:
-            cpu_other_result = _compile_and_run(
-                fn, get_args(), "cpu", needs_device=needs_device, compile=True
-            )
             _assert_results_close(
                 spyre_result,
-                cpu_other_result,
+                cpu_compile_result,
                 atol,
                 rtol,
                 f"{mode} spyre <-> {mode} cpu",
