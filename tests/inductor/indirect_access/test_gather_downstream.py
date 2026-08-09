@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import DEVICE, cached_randn  # noqa: E402
 from conftest import compare_mode  # noqa: E402
 
-_ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 _ATOL_F16 = 1e-2
 _ATOL_BF16 = 2e-2
 _ATOL_F32 = 1e-5
@@ -39,10 +38,8 @@ class TestGatherFusedDownstreamOperations:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
         os.environ.pop("LX_PLANNING", None)
         os.environ.pop("CO_OPTIMIZING_LX_PLANNING", None)
@@ -402,23 +399,6 @@ class TestGatherFusedDownstreamOperations:
             expected = x[idx]
             result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, expected, atol=_ATOL_F16, rtol=_ATOL_F16)
-
-    def test_gate_off_no_gather_op(self, execution_mode):
-        """gate=0 — DIRECT_OP_SPEC used; output still matches CPU."""
-        os.environ[_ENABLE_FLAG] = "0"
-        x = cached_randn((32, 256), differentiation="gem08", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_gate_on_gather_op(self, execution_mode):
-        """gate=1 — GATHER_OP_SPEC emitted; indirect-access path active."""
-        x = cached_randn((32, 256), differentiation="gem09", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
 
     def test_fusion_disabled(self, execution_mode):
         """ENABLE_FUSION=0 — gather and downstream as separate kernels."""

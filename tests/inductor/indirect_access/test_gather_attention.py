@@ -25,7 +25,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import cached_randn  # noqa: E402
 from conftest import compare_mode  # noqa: E402
 
-_ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 _ATOL_F16 = 1e-2
 _ATOL_BF16 = 2e-2
 _ATOL_SDPA = 2e-2
@@ -40,10 +39,8 @@ class TestGatherPagedAttentionAndSDPA:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
         os.environ.pop("LX_PLANNING", None)
 

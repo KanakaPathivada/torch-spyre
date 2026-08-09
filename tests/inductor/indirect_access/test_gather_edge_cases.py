@@ -25,7 +25,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import DEVICE, cached_randn  # noqa: E402
 from conftest import compare_mode  # noqa: E402
 
-_ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 _ATOL_F16 = 1e-2
 _ATOL_BF16 = 2e-2
 _ATOL_F32 = 1e-5
@@ -40,10 +39,8 @@ class TestGatherBoundaryNumericsAndAPIForms:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
 
     # ------------------------------------------------------------------
@@ -154,8 +151,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         )
 
     def test_gate_off_correct_fallback(self, execution_mode):
-        """Flag off → correct fallback result; no regression."""
-        os.environ.pop(_ENABLE_FLAG, None)
+        """Numeric correctness baseline: output matches CPU reference."""
         x = cached_randn((64, 128), differentiation="ec14", dtype=torch.float16)
         idx = torch.randint(0, 64, (16,), dtype=torch.int32)
         compare_mode(
@@ -514,8 +510,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         )
 
     def test_index_select_gate_off(self, execution_mode):
-        """index_select with flag off → correct fallback."""
-        os.environ.pop(_ENABLE_FLAG, None)
+        """index_select numeric correctness: output matches CPU reference."""
         x = cached_randn((64, 128), differentiation="idxs15", dtype=torch.float16)
         idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
@@ -528,14 +523,6 @@ class TestGatherBoundaryNumericsAndAPIForms:
         )
 
     # ------------------------------------------------------------------
-
-    def test_api_basic_subscript(self, execution_mode):
-        """x[idx] subscript form; standard Python API."""
-        x = cached_randn((64, 128), differentiation="api01", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
 
     def test_api_torch_gather_dim0(self, execution_mode):
         """torch.gather(x, 0, idx_expanded); canonical form."""
@@ -889,14 +876,6 @@ class TestGatherBoundaryNumericsAndAPIForms:
 
     # ------------------------------------------------------------------
 
-    def test_single_gather_plan_parses_correctly(self, execution_mode):
-        """Single gather in compiled graph; job plan parse succeeds and output matches CPU."""
-        x = cached_randn((64, 128), differentiation="bug01", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
     def test_two_gathers_same_graph_both_correct(self, execution_mode):
         """Two sources, same index, one compiled graph; both gathers execute correctly."""
         x = cached_randn((64, 128), differentiation="bug02a", dtype=torch.float16)
@@ -1213,6 +1192,22 @@ class TestGatherBoundaryNumericsAndAPIForms:
         idx = torch.tensor([0], dtype=torch.int32)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
+    def test_negative_index_int64(self, execution_mode):
+        """Negative int64 index values; PyTorch defines x[tensor([-1])] as the last row."""
+        x = cached_randn((16, 64), differentiation="neg_idx01", dtype=torch.float16)
+        idx = torch.tensor([-1, -2, 0, 5, -1], dtype=torch.int64)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
+
+    def test_negative_index_int64_downcast(self, execution_mode):
+        """Negative int64 through the int64→int32 downcast path; -1 must map to M-1, not wrap as uint32."""
+        x = cached_randn((32, 128), differentiation="neg_idx02", dtype=torch.float16)
+        idx = torch.tensor([-1, -4, -8, -16, 0, 3], dtype=torch.int64)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
+
     def test_index_select_dim2_on_4d(self, execution_mode):
         """index_select at dim=2 on (2,4,32,64); head-level sequence position selection."""
         x = cached_randn(
@@ -1252,10 +1247,8 @@ class TestGatherOutParameterEagerCompile:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
 
     def test_gather_out_dim0_basic(self, execution_mode):

@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import DEVICE, cached_randn  # noqa: E402
 from conftest import compare_mode  # noqa: E402
 
-_ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 _ATOL_F16 = 1e-2
 _ATOL_BF16 = 2e-2
 _ATOL_F32 = 1e-5
@@ -39,10 +38,8 @@ class TestGatherSpyreTensorLayoutAnnotation:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
         os.environ.pop("LX_PLANNING", None)
 
@@ -175,23 +172,6 @@ class TestGatherSpyreTensorLayoutAnnotation:
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_stl_gate_off(self, execution_mode):
-        """gate=0 — STL specified but indirect access disabled."""
-        os.environ[_ENABLE_FLAG] = "0"
-        x = cached_randn((32, 256), differentiation="gstl13", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_stl_index_never_has_stl(self, execution_mode):
-        """Index tensor must not receive an STL annotation; output correct."""
-        x = cached_randn((32, 256), differentiation="gstl14", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
     def test_stl_embedding_shape(self, execution_mode):
         """Large vocab (32000,128) embedding; stick-aligned inner dim at production scale."""
         x = cached_randn((1024, 128), differentiation="gstl15", dtype=torch.float16)
@@ -262,14 +242,6 @@ class TestGatherSpyreTensorLayoutAnnotation:
         x = cached_randn((32, 256), differentiation="cmp05", dtype=torch.bfloat16)
         idx = torch.randint(0, 32, (16,), dtype=torch.int32)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
-
-    def test_stl_sdsc_encoding_differs(self, execution_mode):
-        """GSTLCMP-06: STL changes device_coordinates in SDSC; output still identical."""
-        x = cached_randn((32, 256), differentiation="cmp06", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
 
     def test_stl_removal_regression(self, execution_mode):
         """GSTLCMP-07: Removing unnecessary STL does not change output."""
