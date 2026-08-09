@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import DEVICE, cached_randn  # noqa: E402
 from conftest import compare_mode  # noqa: E402
 
-_ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 _ATOL_F16 = 1e-2
 _ATOL_BF16 = 2e-2
 _ATOL_F32 = 1e-5
@@ -39,10 +38,8 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
         os.environ.pop("LX_PLANNING", None)
         os.environ.pop("DXP_LX_FRAC_AVAIL", None)
@@ -52,23 +49,6 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
     def test_gather_op_spec_present(self, execution_mode):
         """Flag on → indirect access path executes; eager and compiled outputs match CPU."""
         x = cached_randn((64, 128), differentiation="gcp01", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_gather_gate_off_no_op_spec(self, execution_mode):
-        """Flag off → CPU fallback path; eager and compiled outputs still match CPU reference."""
-        os.environ.pop(_ENABLE_FLAG, None)
-        x = cached_randn((64, 128), differentiation="gcp02", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_compute_op_routing(self, execution_mode):
-        """GATHER_OP_SPEC routes to SDSC indirect-access compute op."""
-        x = cached_randn((64, 128), differentiation="gcp03", dtype=torch.float16)
         idx = torch.randint(0, 64, (32,), dtype=torch.int32)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
@@ -98,14 +78,6 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_pass_order_is_correct(self, execution_mode):
-        """Compiler pass ordering: STL → GATHER_OP_SPEC → SDSC encoding."""
-        x = cached_randn((64, 128), differentiation="gcp06", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
     def test_reshape_before_gather(self, execution_mode):
         """Reshape barrier before gather; GATHER_OP_SPEC at post-reshape."""
         x = cached_randn((8, 8, 128), differentiation="gcp07", dtype=torch.float16)
@@ -128,30 +100,6 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
         torch.testing.assert_close(result, x[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
-
-    def test_indirect_alloc_type(self, execution_mode):
-        """indirectAllocType attribute set to GATHER; verified via output."""
-        x = cached_randn((64, 128), differentiation="gcp09", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_fx_direct_op_spec(self, execution_mode):
-        """torch.compile emits valid Spyre graph; eager and compiled both match CPU."""
-        x = cached_randn((64, 128), differentiation="gcp10", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_compile_debug_artifacts(self, execution_mode):
-        """Debug compile produces valid output (TORCH_COMPILE_DEBUG path)."""
-        x = cached_randn((64, 128), differentiation="gcp11", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
 
     def test_gather_with_downstream_fused(self, execution_mode):
         """Downstream op fused into SDSC; single kernel generated."""
@@ -400,23 +348,6 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
 
     # ------------------------------------------------------------------
 
-    def test_gate_on_produces_result(self, execution_mode):
-        """Flag on → Spyre indirect path executes; output matches CPU."""
-        x = cached_randn((64, 128), differentiation="cfg01", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_gate_off_cpu_fallback(self, execution_mode):
-        """Flag off → CPU fallback; result still correct."""
-        os.environ.pop(_ENABLE_FLAG, None)
-        x = cached_randn((64, 128), differentiation="cfg02", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
     @pytest.mark.parametrize(
         "sencores,shape,P,diff_key",
         [
@@ -438,22 +369,6 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
         """LX_PLANNING=1 + gather; index not placed in LX."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="cfg06", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_lx_planning_off(self, execution_mode):
-        """LX_PLANNING not set; default allocation."""
-        x = cached_randn((64, 128), differentiation="cfg07", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_fusion_disabled_still_correct(self, execution_mode):
-        """Downstream fusion disabled at torch.compile level; eager and compiled both correct."""
-        x = cached_randn((64, 128), differentiation="cfg08", dtype=torch.float16)
         idx = torch.randint(0, 64, (32,), dtype=torch.int32)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
@@ -565,8 +480,7 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
         )
 
     def test_lxd_gate_off_no_lx(self, execution_mode):
-        """Gather flag off; LX_PLANNING=1 still works for non-gather ops."""
-        os.environ.pop(_ENABLE_FLAG, None)
+        """LX_PLANNING=1 works correctly for non-gather ops."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="lxd08", dtype=torch.float16)
         compare_mode(

@@ -27,16 +27,12 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import compare_with_cpu  # noqa: E402
 
-_ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
-
 
 @pytest.fixture
 def env_gather():
-    """Enable indirect access feature gate and set SENCORES=1."""
-    os.environ[_ENABLE_FLAG] = "1"
+    """Set SENCORES=1 for indirect access tests."""
     os.environ["SENCORES"] = "1"
     yield
-    os.environ.pop(_ENABLE_FLAG, None)
     os.environ.pop("SENCORES", None)
 
 

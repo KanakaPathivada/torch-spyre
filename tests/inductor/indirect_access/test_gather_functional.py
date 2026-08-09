@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import cached_randn  # noqa: E402
 from conftest import compare_mode  # noqa: E402
 
-_ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
 _ATOL_F16 = 1e-2
 
 
@@ -37,10 +36,8 @@ class TestGatherShapeRankAndIndexPatterns:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
 
     # ------------------------------------------------------------------
@@ -345,6 +342,19 @@ class TestGatherShapeRankAndIndexPatterns:
             rtol=_ATOL_F16,
         )
 
+    def test_take_along_dim_none_flat(self, execution_mode):
+        """take_along_dim(x_flat, idx, dim=0): flatten-then-gather (dim=None mode); API gap closure."""
+        x = cached_randn((16, 32), differentiation="gfc_tad_none", dtype=torch.float16)
+        flat_idx = torch.randint(0, 16 * 32, (64,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda x, i: torch.take_along_dim(x.reshape(-1), i, dim=0),
+            x,
+            flat_idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
 
 @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
 @pytest.mark.parametrize("execution_mode", ["eager", "compiled"])
@@ -369,10 +379,8 @@ class TestGatherNonLeadingDimEagerCompile:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
 
     # -- dim=1: fully-independent index (attention head / sequence position) --

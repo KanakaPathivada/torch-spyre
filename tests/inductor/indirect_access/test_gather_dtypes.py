@@ -25,8 +25,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import cached_randn  # noqa: E402
 from conftest import compare_mode  # noqa: E402
 
-_ENABLE_FLAG = "SPYRE_INDUCTOR_ENABLE_ADD_INDEX_TO_ADDRESS"
-
 
 @pytest.mark.parametrize("execution_mode", ["eager", "compiled"])
 class TestGatherValueAndIndexDtypeCoverage:
@@ -37,10 +35,8 @@ class TestGatherValueAndIndexDtypeCoverage:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ[_ENABLE_FLAG] = "1"
         os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop(_ENABLE_FLAG, None)
         os.environ.pop("SENCORES", None)
         os.environ.pop("TORCH_SPYRE_DOWNCAST_WARN", None)
 
