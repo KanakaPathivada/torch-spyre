@@ -648,17 +648,38 @@ def _pattern_resolve(variant, args):
     raise ValueError(f"unknown transpose suite variant {variant}")
 
 
-# Large test_large_matmul shapes: on s390x/ppc64, live fp16 CPU GEMM can be
-# extremely slow (no optimized fp16 BLAS). Use fp32→fp16 CPU refs for these
-# shapes only. Keep in sync with PARAMS for ("test_large_matmul", ...).
-_LARGE_MATMUL_FP32_CPU_REF_SHAPES = {
-    ((2048, 2048), (2048, 65536)),  # 2d_M2048_K2048_N65536
-    ((2, 2, 2048, 2048), (2, 2, 2048, 65472)),  # 4d_B2_H2_M2048_K2048_N65472
-}
+# Param-set keys under TestOps.PARAMS[("test_large_matmul", "test_mm_relaxed")]
+# that use fp32→fp16 CPU refs on s390x/ppc64 (proxy gold for speed, not fp16-CPU
+# parity vs x86). Shapes are derived from those PARAMS entries after TestOps is
+# defined so this allow-list cannot silently drift from PARAMS.
+_LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS = frozenset(
+    {
+        "2d_M2048_K2048_N65536",
+        "4d_B2_H2_M2048_K2048_N65472",
+    }
+)
+
+# Populated from TestOps.PARAMS after the class body runs (see bottom of module).
+_LARGE_MATMUL_FP32_CPU_REF_SHAPES = set()
+
+
+def _derive_large_matmul_fp32_cpu_ref_shapes(param_sets) -> set:
+    missing = _LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS - param_sets.keys()
+    if missing:
+        raise RuntimeError(
+            "large-matmul fp32 CPU ref param keys missing from "
+            'TestOps.PARAMS[("test_large_matmul", "test_mm_relaxed")]: '
+            f"{sorted(missing)}"
+        )
+    return {
+        (tuple(param_sets[key][0].shape), tuple(param_sets[key][1].shape))
+        for key in _LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS
+    }
+
 
 # Cached once: platform.machine() is stable for the process.
 _ARCH_NEEDS_LARGE_MATMUL_FP32_CPU_REF = (
-    platform.machine().lower().startswith(("s390", "ppc"))
+    platform.machine().lower().startswith(("s390x", "ppc64"))
 )
 
 
@@ -675,6 +696,12 @@ def _build_large_matmul_fp32_cpu_refs(op, a: torch.Tensor, b: torch.Tensor) -> d
 
     Used for large test_large_matmul shapes on s390x/ppc64 where live fp16 CPU
     GEMM is extremely slow. Spyre still runs on the original fp16 tensors.
+
+    This is a *proxy* numerical gold for CI enablement / wall-time, not fp16-CPU
+    parity: Spyre fp16 is compared to ``op(a.float(), b.float()).to(fp16)``, while
+    x86 and other arches still use live fp16 CPU GEMM as the reference. With the
+    relaxed atol/rtol used by ``test_mm_relaxed`` for multi-stick K, that is
+    intentional and arch-dependent.
     """
     a32 = a.float()
     b32 = b.float()
@@ -7417,6 +7444,10 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
 
         self.compare_with_cpu(fn, x, run_eager=False)
 
+
+_LARGE_MATMUL_FP32_CPU_REF_SHAPES = _derive_large_matmul_fp32_cpu_ref_shapes(
+    TestOps.PARAMS[("test_large_matmul", "test_mm_relaxed")]["param_sets"]
+)
 
 if __name__ == "__main__":
     unittest.main()
