@@ -688,6 +688,9 @@ def _arch_needs_large_matmul_fp32_cpu_ref() -> bool:
 
 
 def _is_large_matmul_fp32_cpu_ref_shape(a: torch.Tensor, b: torch.Tensor) -> bool:
+    # Gated by tensor shapes only. Today these shapes are unique to test_large_matmul;
+    # if another test_mm_relaxed case reused them on s390x/ppc64, it would also take
+    # the fp32→fp16 CPU ref path. Intended coverage is _LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS.
     return (tuple(a.shape), tuple(b.shape)) in _LARGE_MATMUL_FP32_CPU_REF_SHAPES
 
 

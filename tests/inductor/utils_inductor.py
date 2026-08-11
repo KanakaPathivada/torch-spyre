@@ -677,7 +677,8 @@ def compare_with_cpu(
             return args
         return [arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args]
 
-    if cpu_eager_result is None:
+    cpu_eager_precomputed = cpu_eager_result is not None
+    if not cpu_eager_precomputed:
         cpu_eager_result = fn(*get_args())
 
     # Order: compiled first, then eager (matches prior [True, False] when both on).
@@ -711,7 +712,15 @@ def compare_with_cpu(
         )
 
         _assert_results_close(
-            spyre_result, cpu_eager_result, atol, rtol, f"{mode} spyre <-> cpu"
+            spyre_result,
+            cpu_eager_result,
+            atol,
+            rtol,
+            (
+                f"{mode} spyre <-> precomputed cpu ref"
+                if cpu_eager_precomputed
+                else f"{mode} spyre <-> cpu"
+            ),
         )
 
         if cpu_compile:
