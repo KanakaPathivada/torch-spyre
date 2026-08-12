@@ -58,7 +58,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_3d_unary(self, execution_mode, op, diff_key):
         """3D gather on (8,32,128) + unary op co-scheduled."""
         x = cached_randn((8, 32, 128), differentiation=diff_key, dtype=torch.float16)
-        idx = torch.randint(0, 8, (4,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (4,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: op(x[i]),
@@ -73,7 +73,7 @@ class TestGatherFusedDownstreamOperations:
         x = cached_randn(
             (32, 128), differentiation="gds04", dtype=torch.bfloat16, abs=True
         )
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.sqrt(x[i]),
@@ -87,7 +87,7 @@ class TestGatherFusedDownstreamOperations:
         """float32 gather + exp downstream; no fp16 precision loss."""
         x = cached_randn((32, 128), differentiation="gds05", dtype=torch.float32)
         x = x.abs()
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.exp(x[i].clamp(max=10.0)),
@@ -100,7 +100,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_triple_unary(self, execution_mode):
         """Triple-chained exp → tanh → sigmoid after gather."""
         x = cached_randn((32, 256), differentiation="gds06", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.sigmoid(torch.tanh(torch.exp(x[i].clamp(max=5.0)))),
@@ -113,7 +113,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_scalar_sub(self, execution_mode):
         """Scalar subtraction (- 0.5) after gather."""
         x = cached_randn((32, 128), differentiation="gds07", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i] - 0.5,
@@ -126,7 +126,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_scalar_div(self, execution_mode):
         """Scalar divide (/ 8.0) — attention head scale."""
         x = cached_randn((32, 256), differentiation="gds08", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i] / 8.0,
@@ -139,7 +139,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_mean_reduction(self, execution_mode):
         """mean(dim=1) after gather; output collapses to (16,)."""
         x = cached_randn((32, 128), differentiation="gds09", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i].mean(dim=1),
@@ -152,7 +152,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_sum_dim0(self, execution_mode):
         """sum(dim=0) after gather; output shape (128,)."""
         x = cached_randn((32, 128), differentiation="gds10", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i].sum(dim=0),
@@ -165,7 +165,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_cos_cpu_fallback(self, execution_mode):
         """cos has no Spyre kernel; gather on Spyre, cos falls back to CPU."""
         x = cached_randn((32, 64), differentiation="gds11", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.cos(x[i].float()).half(),
@@ -180,7 +180,7 @@ class TestGatherFusedDownstreamOperations:
         x = cached_randn(
             (32, 64), differentiation="gds12", dtype=torch.float16, abs=True
         )
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.log(x[i].float().clamp(min=1e-6)).half(),
@@ -193,7 +193,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_softmax(self, execution_mode):
         """gather + softmax(dim=-1); rows sum to 1.0."""
         x = cached_randn((32, 128), differentiation="gds13", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.softmax(x[i].float(), dim=-1).half(),
@@ -206,7 +206,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_abs_then_sum(self, execution_mode):
         """abs → sum(dim=1) two-stage downstream chain."""
         x = cached_randn((32, 256), differentiation="gds14", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.abs(x[i]).sum(dim=1),
@@ -219,7 +219,7 @@ class TestGatherFusedDownstreamOperations:
     def test_gather_scalar_mul_3d(self, execution_mode):
         """Scalar multiply (* 2.0) on 3D gathered output (4,16,64)."""
         x = cached_randn((8, 16, 64), differentiation="gds15", dtype=torch.float16)
-        idx = torch.randint(0, 8, (4,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (4,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i] * 2.0,
@@ -239,7 +239,7 @@ class TestGatherFusedDownstreamOperations:
     def test_named_2d_basic(self, execution_mode):
         """name_tensor_dims on 2D value + 1D index; baseline named-dim gather."""
         x = cached_randn((32, 256), differentiation="ndm01", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         self._name_dims(x, {"M": 32, "N": 256})
         self._name_dims(idx, {"P": 16})
         compare_mode(
@@ -249,7 +249,7 @@ class TestGatherFusedDownstreamOperations:
     def test_named_3d_basic(self, execution_mode):
         """3D named dims A,B,C; all three axes annotated."""
         x = cached_randn((8, 32, 128), differentiation="ndm02", dtype=torch.float16)
-        idx = torch.randint(0, 8, (4,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (4,), dtype=torch.int64)
         self._name_dims(x, {"A": 8, "B": 32, "C": 128})
         self._name_dims(idx, {"P": 4})
         compare_mode(
@@ -259,7 +259,7 @@ class TestGatherFusedDownstreamOperations:
     def test_named_kv_pattern(self, execution_mode):
         """Paged KV naming: cache, H, D on value; B, Lk on index."""
         kv = cached_randn((512, 8, 64), differentiation="ndm03", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         self._name_dims(kv, {"cache": 512, "H": 8, "D": 64})
         self._name_dims(idx, {"slots": 32})
         compare_mode(
@@ -279,7 +279,7 @@ class TestGatherFusedDownstreamOperations:
     def test_named_moe(self, execution_mode):
         """MoE expert weight naming: E, D, F axes."""
         w = cached_randn((8, 512, 64), differentiation="ndm05", dtype=torch.float16)
-        idx = torch.randint(0, 8, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (16,), dtype=torch.int64)
         self._name_dims(w, {"E": 8, "D": 512, "F": 64})
         self._name_dims(idx, {"tokens": 16})
         compare_mode(
@@ -289,7 +289,7 @@ class TestGatherFusedDownstreamOperations:
     def test_named_stl_combo(self, execution_mode):
         """Named dims + explicit STL co-exist in compiled graph."""
         x = cached_randn((32, 256), differentiation="ndm06", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         self._name_dims(x, {"M": 32, "N": 256})
         self._name_dims(idx, {"P": 16})
         compare_mode(
@@ -300,7 +300,7 @@ class TestGatherFusedDownstreamOperations:
         """Full four-tensor attention naming (q, k, v, slot)."""
         q = cached_randn((2, 4, 8, 64), differentiation="ndm07q", dtype=torch.float16)
         kv = cached_randn((512, 8, 64), differentiation="ndm07kv", dtype=torch.float16)
-        idx = torch.randint(0, 512, (2 * 4,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (2 * 4,), dtype=torch.int64)
         self._name_dims(q, {"B": 2, "Lq": 4, "H": 8, "D": 64})
         self._name_dims(kv, {"cache": 512, "H": 8, "D": 64})
         self._name_dims(idx, {"slots": 2 * 4})
@@ -311,7 +311,7 @@ class TestGatherFusedDownstreamOperations:
     def test_named_dims_propagate(self, execution_mode):
         """Named dims on value propagate through gather to output buffer."""
         x = cached_randn((32, 128), differentiation="ndm08", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         self._name_dims(x, {"M": 32, "N": 128})
         self._name_dims(idx, {"P": 16})
         compare_mode(
@@ -321,7 +321,7 @@ class TestGatherFusedDownstreamOperations:
     def test_named_idx_only(self, execution_mode):
         """Partial naming — index named, value unnamed."""
         x = cached_randn((32, 128), differentiation="ndm09", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         self._name_dims(idx, {"P": 16})
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
@@ -330,7 +330,7 @@ class TestGatherFusedDownstreamOperations:
     def test_named_with_downstream(self, execution_mode):
         """Named dims preserved through gather → exp → sum chain."""
         x = cached_randn((32, 128), differentiation="ndm10", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         self._name_dims(x, {"M": 32, "N": 128})
         self._name_dims(idx, {"P": 16})
         compare_mode(
@@ -356,7 +356,7 @@ class TestGatherFusedDownstreamOperations:
         """2D gather on (32,256) at SENCORES=1/4/32."""
         os.environ["SENCORES"] = sencores
         x = cached_randn((32, 256), differentiation=diff_key, dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -365,7 +365,7 @@ class TestGatherFusedDownstreamOperations:
         """Multi-core 3D gather (SENCORES=4) on (8,32,128)."""
         os.environ["SENCORES"] = "4"
         x = cached_randn((8, 32, 128), differentiation="gem04", dtype=torch.float16)
-        idx = torch.randint(0, 8, (4,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (4,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -383,7 +383,7 @@ class TestGatherFusedDownstreamOperations:
         """Full-chip 3D KV pool gather (SENCORES=32) on (1024,8,64)."""
         os.environ["SENCORES"] = "32"
         kv = cached_randn((256, 8, 64), differentiation="gem06", dtype=torch.float16)
-        idx = torch.randint(0, 256, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 256, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -395,7 +395,7 @@ class TestGatherFusedDownstreamOperations:
         x = cached_randn((32, 256), differentiation="gem07", dtype=torch.float16)
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         for p in (8, 16):
-            idx = torch.randint(0, 32, (p,), dtype=torch.int32)
+            idx = torch.randint(0, 32, (p,), dtype=torch.int64)
             expected = x[idx]
             result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, expected, atol=_ATOL_F16, rtol=_ATOL_F16)
@@ -404,7 +404,7 @@ class TestGatherFusedDownstreamOperations:
         """ENABLE_FUSION=0 — gather and downstream as separate kernels."""
         os.environ["SPYRE_INDUCTOR_ENABLE_FUSION"] = "0"
         x = cached_randn((32, 256), differentiation="gem10", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.exp(x[i]),
@@ -418,7 +418,7 @@ class TestGatherFusedDownstreamOperations:
         """LX_PLANNING=1 — index must remain in HBM; downstream may use LX."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((32, 256), differentiation="gem11", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -428,7 +428,7 @@ class TestGatherFusedDownstreamOperations:
         if execution_mode == "eager":
             pytest.skip("compile-only test")
         x = cached_randn((32, 256), differentiation="gem12", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         fn = torch.compile(lambda x, i: torch.relu(x[i]))
         r1 = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
         r2 = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
@@ -438,7 +438,7 @@ class TestGatherFusedDownstreamOperations:
         """Gather rows then add broadcast bias; common transformer pre-norm pattern."""
         x = cached_randn((64, 128), differentiation="ds_bias01", dtype=torch.float16)
         bias = cached_randn((128,), differentiation="ds_bias01b", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, b, i: x[i].add(b),
@@ -456,7 +456,7 @@ class TestGatherFusedDownstreamOperations:
             (16, 128), differentiation="ds_gate01r", dtype=torch.float16
         )
         gate = cached_randn((16, 1), differentiation="ds_gate01g", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, r, g, i: x[i] * g + r,

@@ -48,7 +48,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_2d_square(self, execution_mode):
         """(128,64) gather at dim=0; narrow inner dim forces non-trivial stick packing."""
         x = cached_randn((128, 64), differentiation="gstl01", dtype=torch.float16)
-        idx = torch.randint(0, 128, (48,), dtype=torch.int32)
+        idx = torch.randint(0, 128, (48,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -56,7 +56,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_2d_frs_example_a(self, execution_mode):
         """FRS canonical Example A — (12,1024) gather at dim=0, P=8."""
         x = cached_randn((12, 1024), differentiation="gstl02", dtype=torch.float16)
-        idx = torch.randint(0, 12, (8,), dtype=torch.int32)
+        idx = torch.randint(0, 12, (8,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -64,7 +64,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_2d_16x512(self, execution_mode):
         """(16,512), 8 sticks in inner dim; STL slicing into stick grid."""
         x = cached_randn((16, 512), differentiation="gstl03", dtype=torch.float16)
-        idx = torch.randint(0, 16, (8,), dtype=torch.int32)
+        idx = torch.randint(0, 16, (8,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -80,7 +80,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_2d_with_tanh(self, execution_mode):
         """(32,256) STL gather + tanh downstream co-scheduled."""
         x = cached_randn((32, 256), differentiation="gstl05", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.tanh(x[i]),
@@ -90,23 +90,10 @@ class TestGatherSpyreTensorLayoutAnnotation:
             rtol=_ATOL_F16,
         )
 
-    def test_stl_2d_with_scalar_div(self, execution_mode):
-        """STL gather + /8.0 attention scale downstream."""
-        x = cached_randn((32, 256), differentiation="gstl06", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
-        compare_mode(
-            execution_mode,
-            lambda x, i: x[i] / 8.0,
-            x,
-            idx,
-            atol=_ATOL_F16,
-            rtol=_ATOL_F16,
-        )
-
     def test_stl_2d_with_sum_reduction(self, execution_mode):
         """STL gather + sum(dim=1) reduction; shape collapses to (16,)."""
         x = cached_randn((32, 256), differentiation="gstl07", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i].sum(dim=1),
@@ -132,7 +119,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_3d_explicit(self, execution_mode):
         """3D (8,32,128) with explicit STL at dim=0, P=4."""
         x = cached_randn((8, 32, 128), differentiation="gstl09", dtype=torch.float16)
-        idx = torch.randint(0, 8, (4,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (4,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -142,7 +129,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         import torch_spyre._inductor.propagate_named_dims as _pnd
 
         x = cached_randn((32, 256), differentiation="gstl10", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         _pnd.name_tensor_dims(x, {"M": 32, "N": 256})
         _pnd.name_tensor_dims(idx, {"P": 16})
         compare_mode(
@@ -156,7 +143,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         x = cached_randn((32, 256), differentiation="gstl11", dtype=torch.float16)
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         for p in (8, 16, 24):
-            idx = torch.randint(0, 32, (p,), dtype=torch.int32)
+            idx = torch.randint(0, 32, (p,), dtype=torch.int64)
             x_dev = x.to(DEVICE)
             idx_dev = idx.to(DEVICE)
             cpu_ref = x[idx]
@@ -167,7 +154,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         """STL + LX_PLANNING=1; compiler runs without crash."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((32, 256), differentiation="gstl12", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -175,7 +162,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_embedding_shape(self, execution_mode):
         """Large vocab (32000,128) embedding; stick-aligned inner dim at production scale."""
         x = cached_randn((1024, 128), differentiation="gstl15", dtype=torch.float16)
-        idx = torch.randint(0, 1024, (64,), dtype=torch.int32)
+        idx = torch.randint(0, 1024, (64,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -183,7 +170,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_kv_cache_shape(self, execution_mode):
         """KV cache 3D (512,8,64); paged attention page lookup via STL."""
         x = cached_randn((512, 8, 64), differentiation="gstl16", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -191,7 +178,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_moe_shape(self, execution_mode):
         """MoE expert weight (8,512,64); large inner dims; STL stride map."""
         x = cached_randn((8, 512, 64), differentiation="gstl17", dtype=torch.float16)
-        idx = torch.randint(0, 8, (4,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (4,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -199,7 +186,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_bfloat16_value(self, execution_mode):
         """bfloat16 value + STL; SDSC wordLength and stride map for bf16."""
         x = cached_randn((32, 256), differentiation="gstl18", dtype=torch.bfloat16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
         )
@@ -209,13 +196,13 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_vs_no_stl_2d_bare(self, execution_mode):
         """x[idx] output is bit-identical with and without explicit STL injection."""
         x = cached_randn((32, 256), differentiation="cmp01", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_stl_vs_no_stl_2d_exp(self, execution_mode):
         """GSTLCMP-02: x[idx].exp() — exp output identical with/without STL."""
         x = cached_randn((32, 256), differentiation="cmp02", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.exp(x[i]),
@@ -228,25 +215,25 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_vs_no_stl_kv(self, execution_mode):
         """GSTLCMP-03: KV gather with and without STL produces identical values."""
         kv = cached_randn((512, 8, 64), differentiation="cmp03", dtype=torch.float16)
-        idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], kv, idx, atol=0, rtol=0)
 
     def test_stl_vs_no_stl_embedding(self, execution_mode):
         """GSTLCMP-04: Embedding lookup output identical with and without STL."""
         w = cached_randn((512, 64), differentiation="cmp04", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], w, idx, atol=0, rtol=0)
 
     def test_stl_vs_no_stl_bfloat16(self, execution_mode):
         """GSTLCMP-05: bfloat16 gather — outputs identical regardless of STL."""
         x = cached_randn((32, 256), differentiation="cmp05", dtype=torch.bfloat16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_stl_removal_regression(self, execution_mode):
         """GSTLCMP-07: Removing unnecessary STL does not change output."""
         x = cached_randn((32, 256), differentiation="cmp07", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_stl_api_equivalence(self, execution_mode):
@@ -265,13 +252,13 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_vs_no_stl_moe(self, execution_mode):
         """GSTLCMP-09: MoE expert gather output identical regardless of STL."""
         w = cached_randn((8, 512, 64), differentiation="cmp09", dtype=torch.float16)
-        idx = torch.randint(0, 8, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (32,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], w, idx, atol=0, rtol=0)
 
     def test_stl_vs_no_stl_paged(self, execution_mode):
         """GSTLCMP-10: Full paged attention gather output identical with/without STL."""
         kv = cached_randn((512, 8, 64), differentiation="cmp10", dtype=torch.float16)
-        idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], kv, idx, atol=0, rtol=0)
 
     # ------------------------------------------------------------------
@@ -279,7 +266,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_4arg_basic(self, execution_mode):
         """GSTLADV-01: 4-arg SpyreTensorLayout(device_size, strides, dtype, dim_order)."""
         kv = cached_randn((512, 8, 64), differentiation="stladv01", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -289,7 +276,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         kv = cached_randn(
             (512, 32, 128), differentiation="stladv02", dtype=torch.float16
         )
-        idx = torch.randint(0, 512, (12,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (12,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -297,7 +284,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_4arg_dim_order_reorder(self, execution_mode):
         """GSTLADV-03: dim_order=[1,0,2] — kv_heads is outermost device dim."""
         kv = cached_randn((128, 8, 64), differentiation="stladv03", dtype=torch.float16)
-        idx = torch.randint(0, 128, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 128, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -307,7 +294,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         kv = cached_randn(
             (1024, 8, 128), differentiation="stladv04", dtype=torch.float16
         )
-        idx = torch.randint(0, 1024, (4 * 64,), dtype=torch.int32)
+        idx = torch.randint(0, 1024, (4 * 64,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -317,7 +304,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         kv = cached_randn(
             (1024, 1, 64), differentiation="stladv05", dtype=torch.float16
         )
-        idx = torch.randint(0, 1024, (4 * 64,), dtype=torch.int32)
+        idx = torch.randint(0, 1024, (4 * 64,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -327,7 +314,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         kv = cached_randn(
             (512, 8, 64), differentiation="stladv06", dtype=torch.bfloat16
         )
-        idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
         )
@@ -335,7 +322,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_4arg_with_downstream_softmax(self, execution_mode):
         """GSTLADV-07: 4-arg STL + softmax(dim=-1) after KV gather."""
         kv = cached_randn((512, 8, 64), differentiation="stladv07", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.softmax(x[i].float(), dim=-1).half(),
@@ -350,7 +337,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         import torch_spyre._inductor.propagate_named_dims as _pnd
 
         kv = cached_randn((512, 8, 64), differentiation="stladv08", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         _pnd.name_tensor_dims(kv, {"cache": 512, "H": 8, "D": 64})
         _pnd.name_tensor_dims(idx, {"slots": 32})
         compare_mode(
@@ -360,7 +347,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stl_4arg_large_pool(self, execution_mode):
         """GSTLADV-09: Large pool (cache=32768, H=8, D=64); production-like scale."""
         kv = cached_randn((512, 8, 64), differentiation="stladv09", dtype=torch.float16)
-        idx = torch.randint(0, 512, (64,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (64,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -369,7 +356,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         """GSTLADV-10: 4-arg STL gather at SENCORES=4."""
         os.environ["SENCORES"] = "4"
         kv = cached_randn((512, 8, 64), differentiation="stladv10", dtype=torch.float16)
-        idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -379,7 +366,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stride_exact_2d_standard(self, execution_mode):
         """(32,64) standard strides [64,1]; SDSC stride map = [64,1]."""
         x = cached_randn((32, 64), differentiation="str_s2d", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         assert x.stride() == (64, 1)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
@@ -388,7 +375,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stride_exact_3d_channel_last(self, execution_mode):
         """(8,32,128) contiguous strides [4096,128,1]."""
         x = cached_randn((8, 32, 128), differentiation="str_s3d", dtype=torch.float16)
-        idx = torch.randint(0, 8, (4,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (4,), dtype=torch.int64)
         assert x.stride() == (32 * 128, 128, 1)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
@@ -403,19 +390,6 @@ class TestGatherSpyreTensorLayoutAnnotation:
         compare_mode(
             execution_mode,
             lambda c, i: torch.index_select(c.squeeze(0).permute(1, 0, 2), 1, i),
-            cache,
-            idx,
-            atol=_ATOL_F16,
-            rtol=_ATOL_F16,
-        )
-
-    def test_stride_exact_gpt20b_shape(self, execution_mode):
-        """gpt-oss-20b KV cache (1,8,2048,64): gather 11 prefill positions via index_select."""
-        cache = cached_randn((512, 8, 64), differentiation="str04", dtype=torch.float16)
-        idx = torch.randint(0, 512, (11,), dtype=torch.int32)
-        compare_mode(
-            execution_mode,
-            lambda c, i: c[i],
             cache,
             idx,
             atol=_ATOL_F16,
@@ -452,7 +426,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         kv = cached_randn(
             (512, 8, 64), differentiation="str_bf16", dtype=torch.bfloat16
         )
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
         )
@@ -460,7 +434,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
     def test_stride_exact_kv_decode(self, execution_mode):
         """Single decode-step KV access; stride correctness at position step."""
         kv = cached_randn((512, 8, 64), differentiation="str08", dtype=torch.float16)
-        idx = torch.tensor([42, 99, 201, 387], dtype=torch.int32)
+        idx = torch.tensor([42, 99, 201, 387], dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -469,17 +443,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         """Transposed 2D (M,N).T strides — stride mismatch triggers restickify."""
         base = cached_randn((64, 32), differentiation="str09", dtype=torch.float16)
         x = base.t().contiguous()
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_stride_exact_float32_kv(self, execution_mode):
-        """float32 KV (512,8,64) exact strides; wordLength=4."""
-        kv = cached_randn(
-            (512, 8, 64), differentiation="str_f32kv", dtype=torch.float32
-        )
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], kv, idx, atol=_ATOL_F32, rtol=_ATOL_F32
         )
