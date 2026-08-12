@@ -1,8 +1,16 @@
 test_suite_config:
+  labels: [trunk]
   files:
     - path: ${TORCH_ROOT}/test/test_indexing.py
       unlisted_test_mode: skip
       tests:
+        # ---------------------------------------------------------------------------
+        # General indexing behavior: boundary checks, error handling, basic semantics.
+        # These tests validate the fundamental __getitem__/__setitem__ interface
+        # that Spyre supports regardless of indirect access implementation.
+        # Tests in this group raise errors at Python / ATen dispatch layer before
+        # reaching any device kernel.
+        # ---------------------------------------------------------------------------
         - names:
             - NumpyTests::test_boolean_assignment_value_mismatch
             - NumpyTests::test_everything_returns_views
@@ -17,12 +25,254 @@ test_suite_config:
             - TestIndexing::test_out_of_bound_index
             - TestIndexing::test_setitem_expansion_error
             - TestIndexing::test_single_int
+            - TestIndexing::test_step
+            - TestIndexing::test_variable_slicing
+            - TestIndexing::test_unravel_index_errors
+            - TestIndexing::test_zero_dim_index
           mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # torch.Tensor.__setitem__ with step slices and integer row assignment.
+        # These use slice_scatter and basic row setitem — NOT tensor-index indirect
+        # access — and have known failures on Spyre. Excluded from CI.
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_step_assignment
+            - TestIndexing::test_int_assignment
+          mode: skip
+
+        # ===========================================================================
+        # INDIRECT ACCESS — ALL tests below exercise tensor-index-mediated memory
+        # access. Classified mandatory_success regardless of current Spyre support
+        # so that CI tracks every gather-functionality case.
+        # ===========================================================================
+
+        # ---------------------------------------------------------------------------
+        # aten::index.Tensor — indirect read via tensor index
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # Advanced (fancy) indexing with integer tensor indices
+        # aten::index.Tensor path.
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_advancedindex
+            - TestIndexing::test_advancedindex_big
+            - TestIndexing::test_int_indices
+            - TestIndexing::test_int_indices2d
+            - TestIndexing::test_int_indices_broadcast
+            - TestIndexing::test_list_indices
+            - TestIndexing::test_basic_advanced_combined
+            - TestIndexing::test_ellipsis_tensor
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # Boolean mask indexing (aten::index with bool / byte tensor)
+        # Lowers to nonzero() + index — dynamic shape.
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_bool_indices
+            - TestIndexing::test_bool_indices_accumulate
+            - TestIndexing::test_multiple_bool_indices
+            - TestIndexing::test_multi_dimensional_bool_mask
+            - TestIndexing::test_bool_mask_assignment
+            - TestIndexing::test_multi_dimensional_bool_mask_assignment
+            - TestIndexing::test_byte_mask
+            - TestIndexing::test_byte_mask_accumulate
+            - TestIndexing::test_byte_mask2d
+            - TestIndexing::test_multiple_byte_mask
+            - TestIndexing::test_byte_tensor_assignment
+            - TestIndexing::test_index_scalar_with_bool_mask
+            - TestIndexing::test_index_getitem_copy_bools_slices
+            - TestIndexing::test_index_setitem_bools_slices
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # aten::index_put / index_put_ — indirect write via tensor index
+        # Upstream dtype coverage:
+        #   test_index_put_accumulate_large_tensor  no @dtypes — runs once
+        #   test_index_put_src_datatype @dtypes(float16, float32, int8, int16, int32, int64, bfloat16)
+        #     excluded: int8, int16, int32 (not in supported_dtypes); active: float16, int64, bfloat16
+        #   test_index_src_datatype     same @dtypes set; same exclusions apply
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index_put_accumulate_large_tensor
+            - TestIndexing::test_index_put_src_datatype
+            - TestIndexing::test_index_src_datatype
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # torch.take_along_dim — gather along a dimension using an index tensor
+        # Upstream dtype coverage:
+        #   test_take_along_dim         @dtypes(long, float32) active; float64 excluded
+        #   test_take_along_dim_invalid @dtypes(long, float) — validates API contract
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_take_along_dim
+            - TestIndexing::test_take_along_dim_invalid
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # torch.index_reduce_ — scatter-reduce via index tensor
+        # @parametrize("reduce", ["prod","amin","amax","mean"])
+        # Upstream dtype coverage: @dtypes(*all_types_and(torch.half, torch.bfloat16))
+        # Active after filter: float16, int64, bfloat16; excluded: float64, int8/16/32, uint8
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index_reduce
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # torch.index_copy / index_copy_ — indirect write at indexed positions
+        # torch.index_copy / index_copy_ — indirect write at indexed positions
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index_copy
+            - TestIndexing::test_index_copy_scalars
+            - TestIndexing::test_index_copy_deterministic
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # torch.index_fill / index_fill_ — fill values at indexed positions
+        # Not yet implemented on Spyre.
+        # Upstream dtype coverage:
+        #   @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+        #   Active after filter: float16, int64, bfloat16, bool
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index_fill
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # torch.index_select — selects along a dimension using an index tensor
+        # Implemented on Spyre (aten.index.Tensor → _add_indices_to_address_index).
+        # @onlyNativeDeviceTypes: privateuse1 IS treated as native — collected on Spyre.
+        # Upstream dtype coverage:
+        #   @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
+        #   Active after filter: float16, float32, int64, bfloat16, bool
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index_select
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # NumpyTests — integer fancy indexing (aten::index.Tensor read path)
+        # ---------------------------------------------------------------------------
+        - names:
+            - NumpyTests::test_empty_tuple_index
+            - NumpyTests::test_empty_fancy_index
+            - NumpyTests::test_ellipsis_index
+            - NumpyTests::test_single_int_index
+            - NumpyTests::test_index_is_larger
+            - NumpyTests::test_broadcast_subspace
+            - NumpyTests::test_trivial_fancy_out_of_bounds
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # NumpyTests — boolean mask indexing (nonzero + index path)
+        # ---------------------------------------------------------------------------
+        - names:
+            - NumpyTests::test_single_bool_index
+            - NumpyTests::test_boolean_indexing_onedim
+            - NumpyTests::test_boolean_indexing_twodim
+            - NumpyTests::test_boolean_indexing_weirdness
+            - NumpyTests::test_boolean_indexing_weirdness_tensors
+            - NumpyTests::test_boolean_indexing_alldims
+            - NumpyTests::test_boolean_list_indexing
+            - NumpyTests::test_broaderrors_indexing
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # Boolean shape mismatch validation
+        # IndexError fires at Python/ATen dimension-check before reaching Spyre kernel.
+        # ---------------------------------------------------------------------------
+        - names:
+            - NumpyTests::test_boolean_shape_mismatch
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # Error-validation tests: IndexError / RuntimeError at Python/ATen layer
+        # before kernel dispatch. All exercise the indexing path.
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index_tensor_empty_indices
+            - TestIndexing::test_empty_ndim_index_bool
+            - TestIndexing::test_index_limits
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # aten::index.Tensor extended edge cases
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_empty_index
+            - TestIndexing::test_empty_ndim_index
+            - TestIndexing::test_getitem_scalars
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # Scalar-tensor setitem — indirect write path
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_setitem_scalars
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # aten::index_put extended cases — indirect write
+        # Upstream dtype coverage for _put_ tests:
+        #   @dtypes(float16, float32, int8, int16, int32, int64, bfloat16)
+        #   Active after filter: float16, int64, bfloat16
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index_put_accumulate_expanded_values
+            - TestIndexing::test_index_put_accumulate_duplicate_indices
+            - TestIndexing::test_index_ind_dtype
+            - TestIndexing::test_index_put_non_accumulate_deterministic
+          mode: mandatory_success
+
+        # ---------------------------------------------------------------------------
+        # torch.index_add — indirect accumulation via index tensor
+        # Not yet implemented on Spyre.
+        # Upstream dtype coverage: @dtypes(*all_types_and(torch.half, torch.bfloat16))
+        # Active after filter: float16, int64, bfloat16
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestIndexing::test_index_add_large_index_vectorized_path
+            - TestIndexing::test_index_add_deterministic
+          mode: mandatory_success
+
   global:
     supported_dtypes:
+      # -----------------------------------------------------------------------
+      # Active dtypes — run on Spyre today
+      # -----------------------------------------------------------------------
       - name: float16
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+        description: Spyre primary float dtype. Active in test_index_put_src_datatype, test_index_src_datatype, test_index_copy, test_index_fill, test_index_reduce,
+          test_take_along_dim (via all_types_and / explicit @dtypes).
+      - name: float32
+        description: Active in test_take_along_dim, test_take_along_dim_invalid, test_index_reduce (all_types_and), test_index_copy, test_index_fill, test_index_select,
+          test_index_put_src_datatype.
       - name: int64
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+        description: Active in test_advancedindex (@dtypes(float64,int64) — float64 excluded), test_take_along_dim, test_index_reduce, test_index_copy,
+          and as integer index dtype.
       - name: bfloat16
-        description: Supported by both Spyre and CPU. Required floating point dtype for the test.
+        description: Active in test_index_put_src_datatype, test_index_copy, test_index_fill, test_index_reduce, test_index_add_large_index_vectorized_path.
+      - name: bool
+        description: Active in test_index_fill, test_index_copy, test_index_select. Also prevents extract_dtype_from_name from filtering tests whose method
+          names contain "bool" (e.g. test_bool_indices, test_bool_mask_assignment, test_byte_mask).
+      # -----------------------------------------------------------------------
+      # Excluded dtypes — present in upstream @dtypes but NOT yet supported on Spyre.
+      # -----------------------------------------------------------------------
+      # - name: float64    # reason: Spyre maximum floating-point precision is float32.
+      # - name: int8       # reason: 8-bit integer ops not supported on Spyre.
+      # - name: int16      # reason: 16-bit integer ops not supported on Spyre.
+      # - name: int32      # reason: 32-bit integer ops not supported on Spyre.
+      # - name: uint8      # reason: unsigned integer ops not supported on Spyre.
+      # - name: complex64  # reason: complex arithmetic not supported on Spyre.
+      # - name: complex128 # reason: complex arithmetic not supported on Spyre.
+      # - name: float8_e4m3fn    # reason: float8 not supported on Spyre.
+      # - name: float8_e4m3fnuz  # same.
+      # - name: float8_e5m2      # same.
+      # - name: float8_e5m2fnuz  # same.
