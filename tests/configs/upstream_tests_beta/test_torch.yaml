@@ -1,5 +1,4 @@
 test_suite_config:
-  labels: [trunk]
 
   files:
     - path: ${TORCH_ROOT}/test/test_torch.py

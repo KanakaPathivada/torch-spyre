@@ -1,0 +1,617 @@
+# Copyright 2025 The Torch-Spyre Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Sequential and composed gather chains: gather→gather, gather→matmul, RoPE cos/sin lookup, K/V split, chunked prefill, RoPE interleaved (GPT-J/NeoX), and end-to-end prefill/decode/beam/speculative pipelines."""
+
+import os
+import sys
+
+import pytest
+import torch
+import torch.nn.functional as F
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from utils_inductor import cached_randn  # noqa: E402
+from conftest import compare_mode  # noqa: E402
+
+_ATOL_F16 = 1e-2
+_ATOL_BF16 = 2e-2
+_ATOL_F32 = 1e-5
+
+
+@pytest.mark.parametrize("execution_mode", ["eager", "compiled"])
+class TestGatherComposedChainsAndEndToEndPipelines:
+    """Sequential gathers, gather→matmul/LN/residual, RoPE gather+apply (rotate-half and interleaved), chunked prefill/decode, parallel K/V, and end-to-end decode/beam/speculative pipelines."""
+
+    def setup_method(self):
+        torch.manual_seed(0xAFFE)
+
+    @pytest.fixture(autouse=True)
+    def env_base(self):
+        os.environ["SENCORES"] = "1"
+        yield
+        os.environ.pop("SENCORES", None)
+
+    # ------------------------------------------------------------------
+
+    def test_two_sequential_gathers(self, execution_mode):
+        """Two back-to-back gather ops; second gather feeds into first output."""
+        table1 = cached_randn((64, 32), differentiation="ch01t1", dtype=torch.float16)
+        table2 = cached_randn((64, 32), differentiation="ch01t2", dtype=torch.float16)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda t1, t2, i: t1[i] + t2[i],
+            table1,
+            table2,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_then_gather_on_output(self, execution_mode):
+        """Second gather re-indexes the output of the first gather."""
+        table = cached_randn((64, 32), differentiation="ch02", dtype=torch.float16)
+        idx1 = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx2 = torch.randint(0, 32, (16,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda t, i1, i2: t[i1][i2],
+            table,
+            idx1,
+            idx2,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_then_matmul(self, execution_mode):
+        """Gather followed by matmul; fused downstream linear."""
+        emb = cached_randn((256, 128), differentiation="ch03e", dtype=torch.float16)
+        w = cached_randn((128, 64), differentiation="ch03w", dtype=torch.float16)
+        idx = torch.randint(0, 256, (32,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda e, w, i: (e[i] @ w),
+            emb,
+            w,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_then_layer_norm(self, execution_mode):
+        """Gather output into layer_norm; end-to-end embedding + norm."""
+        emb = cached_randn((256, 128), differentiation="ch04e", dtype=torch.float16)
+        idx = torch.randint(0, 256, (32,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda e, i: F.layer_norm(e[i].float(), [128]).half(),
+            emb,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_add_residual(self, execution_mode):
+        """Gathered embedding added to residual stream."""
+        emb = cached_randn((256, 128), differentiation="ch05e", dtype=torch.float16)
+        residual = cached_randn((32, 128), differentiation="ch05r", dtype=torch.float16)
+        idx = torch.randint(0, 256, (32,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda e, r, i: e[i] + r,
+            emb,
+            residual,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_split_rope_apply(self, execution_mode):
+        """Gather cos/sin cache, split Q/K, apply RoPE."""
+        cos_sin = cached_randn(
+            (4096, 128), differentiation="ch06cs", dtype=torch.float16
+        )
+        pos = torch.randint(0, 4096, (32,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda cs, p: torch.chunk(cs[p], 2, dim=-1),
+            cos_sin,
+            pos,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_two_tables_add(self, execution_mode):
+        """Lookup from two separate embedding tables, element-wise add."""
+        t1 = cached_randn((128, 64), differentiation="ch07t1", dtype=torch.float16)
+        t2 = cached_randn((128, 64), differentiation="ch07t2", dtype=torch.float16)
+        idx = torch.randint(0, 128, (32,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda t1, t2, i: t1[i] + t2[i],
+            t1,
+            t2,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_then_scatter_add(self, execution_mode):
+        """Gather expert outputs; verify gathered rows then scatter_add_ into accumulator."""
+        expert_w = cached_randn(
+            (8, 32, 64), differentiation="ch08", dtype=torch.float16
+        )
+        ids = torch.randint(0, 8, (16,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda w, i: w[i],
+            expert_w,
+            ids,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+        gathered = expert_w[ids]
+        torch.testing.assert_close(gathered.shape, torch.Size([16, 32, 64]))
+        out = torch.zeros(8, 32, 64, dtype=torch.float16)
+        for k, gid in enumerate(ids.tolist()):
+            out[gid] += gathered[k]
+        assert out.shape == (8, 32, 64)
+
+    # ------------------------------------------------------------------
+
+    def test_chunk_gather_cos_sin(self, execution_mode):
+        """Gather cos_sin[pos]; torch.chunk → cos, sin halves."""
+        cos_sin = cached_randn(
+            (4096, 128), differentiation="chnk01", dtype=torch.float16
+        )
+        pos = torch.randint(0, 4096, (64,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda cs, p: torch.chunk(cs[p], 2, dim=-1),
+            cos_sin,
+            pos,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_split_gather_qkv(self, execution_mode):
+        """QKV split after token embedding gather + linear projection."""
+        emb = cached_randn((512, 128), differentiation="chnk02e", dtype=torch.float16)
+        W = cached_randn((128, 384), differentiation="chnk02w", dtype=torch.float16)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda e, W, i: torch.split(e[i] @ W, 128, dim=-1),
+            emb,
+            W,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_chunked_kv_prefill(self, execution_mode):
+        """Chunked-prefill: gather in 64-token chunks; each chunk independently verified."""
+        kv = cached_randn((512, 8, 64), differentiation="chnk03", dtype=torch.float16)
+
+        def fn(x, i):
+            return x[i]
+
+        for _ in range(4):
+            idx = torch.randint(0, 512, (64,), dtype=torch.int32)
+            compare_mode(execution_mode, fn, kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+
+    def test_rope_gather_broadcast(self, execution_mode):
+        """Gather RoPE freqs then broadcast over head dim."""
+        freqs = cached_randn((4096, 64), differentiation="chnk04", dtype=torch.float16)
+        pos = torch.randint(0, 4096, (32,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda f, p: f[p].unsqueeze(1),
+            freqs,
+            pos,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_concat(self, execution_mode):
+        """Two gathers from separate caches; concat along seq dim."""
+        k1 = cached_randn((256, 8, 64), differentiation="chnk05a", dtype=torch.float16)
+        k2 = cached_randn((256, 8, 64), differentiation="chnk05b", dtype=torch.float16)
+        i1 = torch.randint(0, 256, (32,), dtype=torch.int32)
+        i2 = torch.randint(0, 256, (32,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda k1, k2, i1, i2: torch.cat([k1[i1], k2[i2]], dim=0),
+            k1,
+            k2,
+            i1,
+            i2,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_chunk_then_reduce(self, execution_mode):
+        """Gather + chunk + per-chunk sum reduction; each quarter summed independently."""
+        x = cached_randn((64, 256), differentiation="chnk06", dtype=torch.float16)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda x, i: torch.stack(
+                [c.sum(dim=-1) for c in torch.chunk(x[i], 4, dim=-1)]
+            ),
+            x,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_rope_gather_mul(self, execution_mode):
+        """Gather cos[pos] * q + sin[pos] * rotate90(q) RoPE pattern."""
+        cos = cached_randn((4096, 64), differentiation="chnk07c", dtype=torch.float16)
+        sin = cached_randn((4096, 64), differentiation="chnk07s", dtype=torch.float16)
+        q = cached_randn((32, 64), differentiation="chnk07q", dtype=torch.float16)
+        pos = torch.randint(0, 4096, (32,), dtype=torch.int64)
+        half = q.shape[-1] // 2
+        compare_mode(
+            execution_mode,
+            lambda c, s, q, p: (
+                q * c[p] + torch.cat([-q[:, half:], q[:, :half]], dim=-1) * s[p]
+            ),
+            cos,
+            sin,
+            q,
+            pos,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_unbind_stack(self, execution_mode):
+        """Gather + unbind + stack at new axis."""
+        x = cached_randn((64, 4, 32), differentiation="chnk08", dtype=torch.float16)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda x, i: torch.stack(torch.unbind(x[i], dim=1), dim=0),
+            x,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_chunked_decode_iter(self, execution_mode):
+        """Chunked decode: 8 consecutive single-slot gathers."""
+        kv = cached_randn((512, 8, 64), differentiation="chnk09", dtype=torch.float16)
+
+        def fn(x, i):
+            return x[i]
+
+        for _ in range(8):
+            idx = torch.randint(0, 512, (1,), dtype=torch.int32)
+            compare_mode(execution_mode, fn, kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+
+    def test_chunk_gather_parallel_k_v(self, execution_mode):
+        """Parallel K and V gather in single fn; both correct."""
+        k = cached_randn((512, 8, 64), differentiation="chnk10k", dtype=torch.float16)
+        v = cached_randn((512, 8, 64), differentiation="chnk10v", dtype=torch.float16)
+        idx = torch.randint(0, 512, (64,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda k, v, i: (k[i], v[i]),
+            k,
+            v,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_reshape_chunk(self, execution_mode):
+        """Gather + reshape + chunk for multi-head split."""
+        emb = cached_randn((512, 512), differentiation="chnk11", dtype=torch.float16)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda e, i: torch.chunk(e[i].reshape(32, 8, 64), 2, dim=1),
+            emb,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_gather_split_apply_merge(self, execution_mode):
+        """Gather → split → per-head op → merge back."""
+        emb = cached_randn((512, 256), differentiation="chnk12", dtype=torch.float16)
+        idx = torch.randint(0, 512, (16,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda e, i: torch.cat(
+                [h.relu() for h in torch.chunk(e[i], 4, dim=-1)], dim=-1
+            ),
+            emb,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    # ------------------------------------------------------------------
+
+    def test_e2e_decode_token_lookup(self, execution_mode):
+        """GE2E-01: Full decode step: token embed + KV read + minimal attention."""
+        vocab = cached_randn((512, 128), differentiation="e2e01v", dtype=torch.float16)
+        kv = cached_randn((512, 8, 64), differentiation="e2e01kv", dtype=torch.float16)
+        tok_id = torch.randint(0, 512, (1,), dtype=torch.int64)
+        slot = torch.randint(0, 512, (1,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda v, kv, t, s: (v[t], kv[s]),
+            vocab,
+            kv,
+            tok_id,
+            slot,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_prefill_embed_lookup(self, execution_mode):
+        """GE2E-02: Prefill: gather 128 token embeddings; output (128, 128)."""
+        vocab = cached_randn((512, 128), differentiation="e2e02", dtype=torch.float16)
+        tok_ids = torch.randint(0, 512, (128,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda v, i: v[i],
+            vocab,
+            tok_ids,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_decode_single_step(self, execution_mode):
+        """GE2E-03: Single autoregressive decode; 1 new token lookup."""
+        vocab = cached_randn((512, 128), differentiation="e2e03v", dtype=torch.float16)
+        kv_k = cached_randn((512, 8, 64), differentiation="e2e03k", dtype=torch.float16)
+        kv_v = cached_randn(
+            (512, 8, 64), differentiation="e2e03v2", dtype=torch.float16
+        )
+        tok = torch.randint(0, 512, (1,), dtype=torch.int64)
+        slots = torch.randint(0, 512, (32,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda v, k, vv, t, s: (v[t], k[s], vv[s]),
+            vocab,
+            kv_k,
+            kv_v,
+            tok,
+            slots,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_batch_decode(self, execution_mode):
+        """GE2E-04: Batch decode B=12 requests; each requests 1 slot."""
+        kv = cached_randn((512, 8, 64), differentiation="e2e04", dtype=torch.float16)
+        slots = torch.randint(0, 512, (12,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda kv, s: kv[s],
+            kv,
+            slots,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_prefill_kv_fill(self, execution_mode):
+        """GE2E-05: Gather prefill KV tokens from paged cache; 32 positions from 128-slot pool."""
+        cache = cached_randn((128, 8, 64), differentiation="e2e05", dtype=torch.float16)
+        pos = torch.arange(32, dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda kv, p: kv[p],
+            cache,
+            pos,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_rope_gather(self, execution_mode):
+        """GE2E-06: RoPE gather + apply; position cache lookup for seq positions."""
+        cos_sin = cached_randn(
+            (4096, 128), differentiation="e2e06", dtype=torch.float16
+        )
+        pos = torch.randint(0, 4096, (128,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda cs, p: torch.index_select(cs, 0, p),
+            cos_sin,
+            pos,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_kv_decode_extend(self, execution_mode):
+        """GE2E-07: Decode extends prefill; gather 128 prefill + 1 decode position from paged cache."""
+        cache = cached_randn((256, 8, 64), differentiation="e2e07", dtype=torch.float16)
+        all_pos = torch.arange(129, dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda kv, p: kv[p],
+            cache,
+            all_pos,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_logit_slice(self, execution_mode):
+        """GE2E-08: Logit extraction at last token position for sampling."""
+        logits = cached_randn(
+            (12, 64, 512), differentiation="e2e08", dtype=torch.float16
+        )
+        compare_mode(
+            execution_mode,
+            lambda x: x[:, -1, :],
+            logits,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_beam_reorder(self, execution_mode):
+        """GE2E-09: Beam search KV reordering via index_select at batch dim."""
+        past_kv = cached_randn(
+            (4, 32, 8, 64), differentiation="e2e09", dtype=torch.float16
+        )
+        beam_idx = torch.tensor([0, 1, 2, 3], dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda x, i: torch.index_select(x, 0, i),
+            past_kv,
+            beam_idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_continuous_batch(self, execution_mode):
+        """GE2E-10: Continuous batch: 4 prefill + 8 decode requests in one gather."""
+        kv = cached_randn((512, 8, 64), differentiation="e2e10", dtype=torch.float16)
+        prefill_slots = torch.randint(0, 512, (128,), dtype=torch.int32)
+        decode_slots = torch.randint(0, 512, (8,), dtype=torch.int32)
+        all_slots = torch.cat([prefill_slots, decode_slots])
+        compare_mode(
+            execution_mode,
+            lambda x, i: x[i],
+            kv,
+            all_slots,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_speculative_token(self, execution_mode):
+        """GE2E-11: Speculative decode: draft token prob lookup."""
+        probs = cached_randn((16, 512), differentiation="e2e11", dtype=torch.float16)
+        draft_tok = torch.randint(0, 512, (5,), dtype=torch.int64)
+        compare_mode(
+            execution_mode,
+            lambda p, d: torch.gather(
+                p[:5], 1, d.unsqueeze(0).expand(5, -1)
+            ).diagonal(),
+            probs,
+            draft_tok,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_e2e_paged_gqa_decode(self, execution_mode):
+        """GE2E-12: GQA decode: kv_heads=8, q_heads=32; paged KV gather."""
+        kv = cached_randn((512, 8, 64), differentiation="e2e12", dtype=torch.float16)
+        slots = torch.randint(0, 512, (32,), dtype=torch.int32)
+        compare_mode(
+            execution_mode, lambda x, i: x[i], kv, slots, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
+
+    def test_e2e_chunked_prefill_then_decode(self, execution_mode):
+        """GE2E-13: Chunked prefill (4×64) then single decode step."""
+        kv = cached_randn((512, 8, 64), differentiation="e2e13", dtype=torch.float16)
+
+        def fn(x, i):
+            return x[i]
+
+        for _ in range(4):
+            idx = torch.randint(0, 512, (64,), dtype=torch.int32)
+            compare_mode(execution_mode, fn, kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+        decode_idx = torch.randint(0, 512, (1,), dtype=torch.int32)
+        compare_mode(execution_mode, fn, kv, decode_idx, atol=_ATOL_F16, rtol=_ATOL_F16)
+
+    def test_e2e_full_pipeline_bfloat16(self, execution_mode):
+        """GE2E-14: bfloat16 end-to-end: embed + KV read + decode output."""
+        vocab = cached_randn((512, 128), differentiation="e2e14v", dtype=torch.bfloat16)
+        kv = cached_randn((512, 8, 64), differentiation="e2e14kv", dtype=torch.bfloat16)
+        tok = torch.randint(0, 512, (8,), dtype=torch.int64)
+        slots = torch.randint(0, 512, (32,), dtype=torch.int32)
+        compare_mode(
+            execution_mode,
+            lambda v, kv, t, s: (v[t], kv[s]),
+            vocab,
+            kv,
+            tok,
+            slots,
+            atol=_ATOL_BF16,
+            rtol=_ATOL_BF16,
+        )
+
+    # ------------------------------------------------------------------
+
+    def test_rope_interleaved_gptj_style(self, execution_mode):
+        """GPT-J interleaved RoPE: gather position embeddings → view_as_complex → multiply → view_as_real."""
+        cos = cached_randn((4096, 32), differentiation="ropi01c", dtype=torch.float32)
+        sin = cached_randn((4096, 32), differentiation="ropi01s", dtype=torch.float32)
+        q = cached_randn((16, 64), differentiation="ropi01q", dtype=torch.float32)
+        pos = torch.randint(0, 4096, (16,), dtype=torch.int64)
+
+        def fn(cos, sin, q, pos):
+            c = cos[pos]
+            s = sin[pos]
+            q_pairs = q.reshape(16, 32, 2).contiguous()
+            q_c = torch.view_as_complex(q_pairs)
+            rot = torch.complex(c, s)
+            return torch.view_as_real(q_c * rot).reshape(16, 64)
+
+        compare_mode(
+            execution_mode, fn, cos, sin, q, pos, atol=_ATOL_F32, rtol=_ATOL_F32
+        )
+
+    def test_rope_neox_qk_both(self, execution_mode):
+        """NeoX rotate-half RoPE applied to both Q and K after position gather."""
+        cos_sin = cached_randn(
+            (4096, 128), differentiation="ropi02", dtype=torch.float16
+        )
+        q = cached_randn((16, 64), differentiation="ropi02q", dtype=torch.float16)
+        k = cached_randn((16, 64), differentiation="ropi02k", dtype=torch.float16)
+        pos = torch.randint(0, 4096, (16,), dtype=torch.int64)
+
+        def fn(cache, q, k, pos):
+            cos = cache[pos, :64]
+            sin = cache[pos, 64:]
+            half = q.shape[-1] // 2
+
+            def apply_rope(x):
+                return torch.cat(
+                    [
+                        x[:, :half] * cos - x[:, half:] * sin,
+                        x[:, half:] * cos + x[:, :half] * sin,
+                    ],
+                    dim=-1,
+                )
+
+            return apply_rope(q), apply_rope(k)
+
+        compare_mode(
+            execution_mode, fn, cos_sin, q, k, pos, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
+
+    def test_rope_interleaved_separate_cos_sin_caches(self, execution_mode):
+        """Interleaved RoPE with separate cos/sin caches; both gathered then applied to Q and K."""
+        cos = cached_randn((2048, 64), differentiation="ropi03c", dtype=torch.float16)
+        sin = cached_randn((2048, 64), differentiation="ropi03s", dtype=torch.float16)
+        q = cached_randn((32, 64), differentiation="ropi03q", dtype=torch.float16)
+        k = cached_randn((32, 64), differentiation="ropi03k", dtype=torch.float16)
+        pos = torch.randint(0, 2048, (32,), dtype=torch.int64)
+
+        def fn(cos, sin, q, k, pos):
+            c, s = cos[pos], sin[pos]
+            half = q.shape[-1] // 2
+            q_rot = torch.cat([-q[:, half:], q[:, :half]], dim=-1)
+            k_rot = torch.cat([-k[:, half:], k[:, :half]], dim=-1)
+            return q * c + q_rot * s, k * c + k_rot * s
+
+        compare_mode(
+            execution_mode, fn, cos, sin, q, k, pos, atol=_ATOL_F16, rtol=_ATOL_F16
+        )
