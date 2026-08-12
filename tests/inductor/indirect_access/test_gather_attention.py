@@ -56,7 +56,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn01v", dtype=torch.float16
         )
         q = cached_randn((1, H, 1, D), differentiation="attn01q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (32,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (32,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -84,7 +84,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn02v", dtype=torch.float16
         )
         q = cached_randn((1, H, Lq, D), differentiation="attn02q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (Lq,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (Lq,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -112,7 +112,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H_kv, D), differentiation="attn03v", dtype=torch.float16
         )
         q = cached_randn((1, H_q, 1, D), differentiation="attn03q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (16,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (16,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = (
@@ -150,7 +150,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H_kv, D), differentiation="attn04v", dtype=torch.float16
         )
         q = cached_randn((1, H_q, 1, D), differentiation="attn04q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (32,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (32,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0).expand(1, H_q, 32, D)
@@ -178,7 +178,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn05v", dtype=torch.bfloat16
         )
         q = cached_randn((1, H, 1, D), differentiation="attn05q", dtype=torch.bfloat16)
-        slots = torch.randint(0, pool, (32,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (32,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -206,7 +206,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn06v", dtype=torch.float16
         )
         q = cached_randn((1, H, Lq, D), differentiation="attn06q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (Lq,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (Lq,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -234,7 +234,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn07v", dtype=torch.float16
         )
         q = cached_randn((1, H, Lq, D), differentiation="attn07q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (Lk,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (Lk,), dtype=torch.int64)
         attn_bias = torch.zeros(1, 1, Lq, Lk, dtype=torch.float16)
         attn_bias[0, 0, :, Lk // 2 :] = float("-inf")
 
@@ -265,7 +265,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn08v", dtype=torch.float16
         )
         q = cached_randn((4, H, 1, D), differentiation="attn08q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (4 * Lk,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (4 * Lk,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].reshape(4, Lk, H, D).permute(0, 2, 1, 3)
@@ -294,7 +294,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn09v", dtype=torch.float16
         )
         q = cached_randn((1, H, 1, D), differentiation="attn09q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (32,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (32,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -323,7 +323,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn10v", dtype=torch.float16
         )
         q = cached_randn((1, H, Lq, D), differentiation="attn10q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (Lq,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (Lq,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -352,7 +352,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn11v", dtype=torch.float16
         )
         q = cached_randn((1, H, 1, D), differentiation="attn11q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (32,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (32,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -380,7 +380,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn12v", dtype=torch.float16
         )
         q = cached_randn((B, H, 1, D), differentiation="attn12q", dtype=torch.float16)
-        slot_idxs = torch.randint(0, pool, (B, Lk), dtype=torch.int32)
+        slot_idxs = torch.randint(0, pool, (B, Lk), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(0, 2, 1, 3)
@@ -414,7 +414,7 @@ class TestGatherPagedAttentionAndSDPA:
             (1, H, 1, D), differentiation="attn13q", dtype=torch.float16
         )
         pos = torch.randint(0, 4096, (1,), dtype=torch.int64)
-        slots = torch.randint(0, pool, (Lk,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (Lk,), dtype=torch.int64)
 
         def fn(cs, k_cache, v_cache, q_raw, pos, slots):
             cos = cs[pos, :D]
@@ -458,7 +458,7 @@ class TestGatherPagedAttentionAndSDPA:
             q = cached_randn(
                 (1, H, Lq, D), differentiation=f"attn14q{chunk}", dtype=torch.float16
             )
-            slots = torch.randint(0, pool, (Lq,), dtype=torch.int32)
+            slots = torch.randint(0, pool, (Lq,), dtype=torch.int64)
 
             def fn(k_cache, v_cache, q, s):
                 k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -478,7 +478,7 @@ class TestGatherPagedAttentionAndSDPA:
         q_dec = cached_randn(
             (1, H, 1, D), differentiation="attn14qd", dtype=torch.float16
         )
-        dec_slot = torch.randint(0, pool, (128,), dtype=torch.int32)
+        dec_slot = torch.randint(0, pool, (128,), dtype=torch.int64)
 
         def fn_dec(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -506,7 +506,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, D), differentiation="attn15v", dtype=torch.float16
         )
         q = cached_randn((1, H, 1, D), differentiation="attn15q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (128,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (128,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -534,7 +534,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, Dv), differentiation="attn16v", dtype=torch.float16
         )
         q = cached_randn((1, H, 1, Dk), differentiation="attn16q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (32,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (32,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -565,7 +565,7 @@ class TestGatherPagedAttentionAndSDPA:
         out_proj = cached_randn(
             (H * D, H * D), differentiation="attn17p", dtype=torch.float16
         )
-        slots = torch.randint(0, pool, (32,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (32,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, out_proj, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -599,7 +599,7 @@ class TestGatherPagedAttentionAndSDPA:
         q = cached_randn(
             (B_beam, H, 1, D), differentiation="attn18q", dtype=torch.float16
         )
-        slots = torch.randint(0, pool, (B_beam * 32,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (B_beam * 32,), dtype=torch.int64)
         beam_idx = torch.randperm(B_beam, dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, slots, beam_idx):
@@ -633,7 +633,7 @@ class TestGatherPagedAttentionAndSDPA:
         q_draft = cached_randn(
             (1, H, Ldraft, D), differentiation="attn19q", dtype=torch.float16
         )
-        slots = torch.randint(0, pool, (Ldraft + 4,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (Ldraft + 4,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].permute(1, 0, 2).unsqueeze(0)
@@ -661,7 +661,7 @@ class TestGatherPagedAttentionAndSDPA:
             (pool, H, blk, D), differentiation="attn20v", dtype=torch.float16
         )
         q = cached_randn((1, H, 1, D), differentiation="attn20q", dtype=torch.float16)
-        slots = torch.randint(0, pool, (8,), dtype=torch.int32)
+        slots = torch.randint(0, pool, (8,), dtype=torch.int64)
 
         def fn(k_cache, v_cache, q, s):
             k = k_cache[s].reshape(8 * blk, H, D).permute(1, 0, 2).unsqueeze(0)

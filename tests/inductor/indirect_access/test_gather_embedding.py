@@ -49,7 +49,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_embedding_small_vocab(self, execution_mode):
         """Small vocab (512,64) via advanced indexing; GATHER_OP_SPEC."""
         w = cached_randn((512, 64), differentiation="emb01", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda w, i: w[i], w, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -57,7 +57,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_embedding_medium_vocab(self, execution_mode):
         """Medium vocab (8192,128) via advanced indexing; stick-aligned."""
         w = cached_randn((512, 128), differentiation="emb02", dtype=torch.float16)
-        idx = torch.randint(0, 512, (64,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (64,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda w, i: w[i], w, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -65,7 +65,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_embedding_gpt2_vocab(self, execution_mode):
         """GPT-2 vocab shape (50257,768) approximated; 12-stick row."""
         w = cached_randn((256, 128), differentiation="emb03", dtype=torch.float16)
-        idx = torch.randint(0, 256, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 256, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda w, i: w[i], w, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -73,7 +73,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_embedding_llama3_vocab(self, execution_mode):
         """Llama-3 vocab (128256,4096) shape approximated; large table."""
         w = cached_randn((512, 128), differentiation="emb04", dtype=torch.float16)
-        idx = torch.randint(0, 512, (8,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (8,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda w, i: w[i], w, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -127,7 +127,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_embedding_bfloat16(self, execution_mode):
         """bfloat16 embedding table; SDSC wordLength=2."""
         w = cached_randn((512, 64), differentiation="emb09", dtype=torch.bfloat16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda w, i: w[i], w, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
         )
@@ -135,13 +135,13 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_embedding_float32(self, execution_mode):
         """float32 embedding table; 4-byte elements."""
         w = cached_randn((512, 64), differentiation="emb10", dtype=torch.float32)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda w, i: w[i], w, idx, atol=_ATOL_F32, rtol=_ATOL_F32
         )
 
     def test_embedding_int64_ids(self, execution_mode):
-        """int64 token IDs auto-downcast to int32; lookup still correct."""
+        """int64 token IDs; canonical dtype for embedding table lookup."""
         w = cached_randn((512, 64), differentiation="emb11", dtype=torch.float16)
         idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
@@ -151,7 +151,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_embedding_with_exp(self, execution_mode):
         """Embedding lookup + exp() downstream fused."""
         w = cached_randn((512, 64), differentiation="emb12", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda w, i: torch.exp(w[i]),
@@ -186,7 +186,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
         """Weight-tied model: same matrix for embedding and LM head."""
         w = cached_randn((512, 64), differentiation="emb15", dtype=torch.float16)
         h = cached_randn((8, 64), differentiation="emb15h", dtype=torch.float16)
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
 
         def fn(w, h, i):
             emb_out = w[i]
@@ -324,8 +324,8 @@ class TestGatherEmbeddingTableLookupAndPooling:
         """GEMB2-08: Two separate lookup tables gathered in one graph."""
         w1 = cached_randn((64, 64), differentiation="emb2_08a", dtype=torch.float16)
         w2 = cached_randn((128, 64), differentiation="emb2_08b", dtype=torch.float16)
-        i1 = torch.randint(0, 64, (16,), dtype=torch.int32)
-        i2 = torch.randint(0, 128, (16,), dtype=torch.int32)
+        i1 = torch.randint(0, 64, (16,), dtype=torch.int64)
+        i2 = torch.randint(0, 128, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda w1, w2, i1, i2: (w1[i1], w2[i2]),
@@ -340,7 +340,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_lookup_table_sum_pooling(self, execution_mode):
         """GEMB2-09: Lookup + sum pooling; table[idx].sum(dim=0)."""
         w = cached_randn((64, 128), differentiation="emb2_09", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda w, i: w[i].sum(dim=0),
@@ -353,7 +353,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_lookup_table_mean_pooling(self, execution_mode):
         """GEMB2-10: Lookup + mean pooling; table[idx].mean(dim=0)."""
         w = cached_randn((64, 128), differentiation="emb2_10", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda w, i: w[i].mean(dim=0),
@@ -367,7 +367,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
         """GEMB2-11: Concatenate two lookups on dim=1; feature concatenation."""
         w1 = cached_randn((64, 32), differentiation="emb2_11a", dtype=torch.float16)
         w2 = cached_randn((64, 32), differentiation="emb2_11b", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda a, b, i: torch.cat([a[i], b[i]], dim=1),
@@ -381,7 +381,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_lookup_table_bfloat16(self, execution_mode):
         """GEMB2-12: bfloat16 lookup table gather."""
         w = cached_randn((64, 64), differentiation="emb2_12", dtype=torch.bfloat16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda w, i: w[i], w, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
         )
@@ -389,7 +389,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def test_lookup_table_with_layer_norm(self, execution_mode):
         """GEMB2-13: Lookup table + layer_norm downstream."""
         w = cached_randn((64, 64), differentiation="emb2_13", dtype=torch.float32)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         ln = nn.LayerNorm(64)
         compare_mode(
             execution_mode,
@@ -404,7 +404,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
         """GEMB2-14: Lookup table + linear projection downstream."""
         w = cached_randn((64, 64), differentiation="emb2_14", dtype=torch.float16)
         proj = nn.Linear(64, 32, bias=False).to(torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda w, i: proj(w[i]),

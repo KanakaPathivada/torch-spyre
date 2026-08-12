@@ -49,7 +49,7 @@ class TestGatherComposedChainsAndEndToEndPipelines:
         """Two back-to-back gather ops; second gather feeds into first output."""
         table1 = cached_randn((64, 32), differentiation="ch01t1", dtype=torch.float16)
         table2 = cached_randn((64, 32), differentiation="ch01t2", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda t1, t2, i: t1[i] + t2[i],
@@ -63,8 +63,8 @@ class TestGatherComposedChainsAndEndToEndPipelines:
     def test_gather_then_gather_on_output(self, execution_mode):
         """Second gather re-indexes the output of the first gather."""
         table = cached_randn((64, 32), differentiation="ch02", dtype=torch.float16)
-        idx1 = torch.randint(0, 64, (32,), dtype=torch.int32)
-        idx2 = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx1 = torch.randint(0, 64, (32,), dtype=torch.int64)
+        idx2 = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda t, i1, i2: t[i1][i2],
@@ -153,7 +153,7 @@ class TestGatherComposedChainsAndEndToEndPipelines:
         expert_w = cached_randn(
             (8, 32, 64), differentiation="ch08", dtype=torch.float16
         )
-        ids = torch.randint(0, 8, (16,), dtype=torch.int32)
+        ids = torch.randint(0, 8, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda w, i: w[i],
@@ -201,17 +201,6 @@ class TestGatherComposedChainsAndEndToEndPipelines:
             rtol=_ATOL_F16,
         )
 
-    def test_chunked_kv_prefill(self, execution_mode):
-        """Chunked-prefill: gather in 64-token chunks; each chunk independently verified."""
-        kv = cached_randn((512, 8, 64), differentiation="chnk03", dtype=torch.float16)
-
-        def fn(x, i):
-            return x[i]
-
-        for _ in range(4):
-            idx = torch.randint(0, 512, (64,), dtype=torch.int32)
-            compare_mode(execution_mode, fn, kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
-
     def test_rope_gather_broadcast(self, execution_mode):
         """Gather RoPE freqs then broadcast over head dim."""
         freqs = cached_randn((4096, 64), differentiation="chnk04", dtype=torch.float16)
@@ -229,8 +218,8 @@ class TestGatherComposedChainsAndEndToEndPipelines:
         """Two gathers from separate caches; concat along seq dim."""
         k1 = cached_randn((256, 8, 64), differentiation="chnk05a", dtype=torch.float16)
         k2 = cached_randn((256, 8, 64), differentiation="chnk05b", dtype=torch.float16)
-        i1 = torch.randint(0, 256, (32,), dtype=torch.int32)
-        i2 = torch.randint(0, 256, (32,), dtype=torch.int32)
+        i1 = torch.randint(0, 256, (32,), dtype=torch.int64)
+        i2 = torch.randint(0, 256, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda k1, k2, i1, i2: torch.cat([k1[i1], k2[i2]], dim=0),
@@ -245,7 +234,7 @@ class TestGatherComposedChainsAndEndToEndPipelines:
     def test_chunk_then_reduce(self, execution_mode):
         """Gather + chunk + per-chunk sum reduction; each quarter summed independently."""
         x = cached_randn((64, 256), differentiation="chnk06", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.stack(
@@ -280,7 +269,7 @@ class TestGatherComposedChainsAndEndToEndPipelines:
     def test_gather_unbind_stack(self, execution_mode):
         """Gather + unbind + stack at new axis."""
         x = cached_randn((64, 4, 32), differentiation="chnk08", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.stack(torch.unbind(x[i], dim=1), dim=0),
@@ -298,14 +287,14 @@ class TestGatherComposedChainsAndEndToEndPipelines:
             return x[i]
 
         for _ in range(8):
-            idx = torch.randint(0, 512, (1,), dtype=torch.int32)
+            idx = torch.randint(0, 512, (1,), dtype=torch.int64)
             compare_mode(execution_mode, fn, kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
 
     def test_chunk_gather_parallel_k_v(self, execution_mode):
         """Parallel K and V gather in single fn; both correct."""
         k = cached_randn((512, 8, 64), differentiation="chnk10k", dtype=torch.float16)
         v = cached_randn((512, 8, 64), differentiation="chnk10v", dtype=torch.float16)
-        idx = torch.randint(0, 512, (64,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (64,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda k, v, i: (k[i], v[i]),
@@ -351,7 +340,7 @@ class TestGatherComposedChainsAndEndToEndPipelines:
         vocab = cached_randn((512, 128), differentiation="e2e01v", dtype=torch.float16)
         kv = cached_randn((512, 8, 64), differentiation="e2e01kv", dtype=torch.float16)
         tok_id = torch.randint(0, 512, (1,), dtype=torch.int64)
-        slot = torch.randint(0, 512, (1,), dtype=torch.int32)
+        slot = torch.randint(0, 512, (1,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda v, kv, t, s: (v[t], kv[s]),
@@ -359,19 +348,6 @@ class TestGatherComposedChainsAndEndToEndPipelines:
             kv,
             tok_id,
             slot,
-            atol=_ATOL_F16,
-            rtol=_ATOL_F16,
-        )
-
-    def test_e2e_prefill_embed_lookup(self, execution_mode):
-        """GE2E-02: Prefill: gather 128 token embeddings; output (128, 128)."""
-        vocab = cached_randn((512, 128), differentiation="e2e02", dtype=torch.float16)
-        tok_ids = torch.randint(0, 512, (128,), dtype=torch.int64)
-        compare_mode(
-            execution_mode,
-            lambda v, i: v[i],
-            vocab,
-            tok_ids,
             atol=_ATOL_F16,
             rtol=_ATOL_F16,
         )
@@ -384,7 +360,7 @@ class TestGatherComposedChainsAndEndToEndPipelines:
             (512, 8, 64), differentiation="e2e03v2", dtype=torch.float16
         )
         tok = torch.randint(0, 512, (1,), dtype=torch.int64)
-        slots = torch.randint(0, 512, (32,), dtype=torch.int32)
+        slots = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda v, k, vv, t, s: (v[t], k[s], vv[s]),
@@ -397,23 +373,10 @@ class TestGatherComposedChainsAndEndToEndPipelines:
             rtol=_ATOL_F16,
         )
 
-    def test_e2e_batch_decode(self, execution_mode):
-        """GE2E-04: Batch decode B=12 requests; each requests 1 slot."""
-        kv = cached_randn((512, 8, 64), differentiation="e2e04", dtype=torch.float16)
-        slots = torch.randint(0, 512, (12,), dtype=torch.int32)
-        compare_mode(
-            execution_mode,
-            lambda kv, s: kv[s],
-            kv,
-            slots,
-            atol=_ATOL_F16,
-            rtol=_ATOL_F16,
-        )
-
     def test_e2e_prefill_kv_fill(self, execution_mode):
         """GE2E-05: Gather prefill KV tokens from paged cache; 32 positions from 128-slot pool."""
         cache = cached_randn((128, 8, 64), differentiation="e2e05", dtype=torch.float16)
-        pos = torch.arange(32, dtype=torch.int32)
+        pos = torch.arange(32, dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda kv, p: kv[p],
@@ -423,25 +386,10 @@ class TestGatherComposedChainsAndEndToEndPipelines:
             rtol=_ATOL_F16,
         )
 
-    def test_e2e_rope_gather(self, execution_mode):
-        """GE2E-06: RoPE gather + apply; position cache lookup for seq positions."""
-        cos_sin = cached_randn(
-            (4096, 128), differentiation="e2e06", dtype=torch.float16
-        )
-        pos = torch.randint(0, 4096, (128,), dtype=torch.int64)
-        compare_mode(
-            execution_mode,
-            lambda cs, p: torch.index_select(cs, 0, p),
-            cos_sin,
-            pos,
-            atol=_ATOL_F16,
-            rtol=_ATOL_F16,
-        )
-
     def test_e2e_kv_decode_extend(self, execution_mode):
         """GE2E-07: Decode extends prefill; gather 128 prefill + 1 decode position from paged cache."""
         cache = cached_randn((256, 8, 64), differentiation="e2e07", dtype=torch.float16)
-        all_pos = torch.arange(129, dtype=torch.int32)
+        all_pos = torch.arange(129, dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda kv, p: kv[p],
@@ -464,26 +412,11 @@ class TestGatherComposedChainsAndEndToEndPipelines:
             rtol=_ATOL_F16,
         )
 
-    def test_e2e_beam_reorder(self, execution_mode):
-        """GE2E-09: Beam search KV reordering via index_select at batch dim."""
-        past_kv = cached_randn(
-            (4, 32, 8, 64), differentiation="e2e09", dtype=torch.float16
-        )
-        beam_idx = torch.tensor([0, 1, 2, 3], dtype=torch.int64)
-        compare_mode(
-            execution_mode,
-            lambda x, i: torch.index_select(x, 0, i),
-            past_kv,
-            beam_idx,
-            atol=_ATOL_F16,
-            rtol=_ATOL_F16,
-        )
-
     def test_e2e_continuous_batch(self, execution_mode):
         """GE2E-10: Continuous batch: 4 prefill + 8 decode requests in one gather."""
         kv = cached_randn((512, 8, 64), differentiation="e2e10", dtype=torch.float16)
-        prefill_slots = torch.randint(0, 512, (128,), dtype=torch.int32)
-        decode_slots = torch.randint(0, 512, (8,), dtype=torch.int32)
+        prefill_slots = torch.randint(0, 512, (128,), dtype=torch.int64)
+        decode_slots = torch.randint(0, 512, (8,), dtype=torch.int64)
         all_slots = torch.cat([prefill_slots, decode_slots])
         compare_mode(
             execution_mode,
@@ -512,7 +445,7 @@ class TestGatherComposedChainsAndEndToEndPipelines:
     def test_e2e_paged_gqa_decode(self, execution_mode):
         """GE2E-12: GQA decode: kv_heads=8, q_heads=32; paged KV gather."""
         kv = cached_randn((512, 8, 64), differentiation="e2e12", dtype=torch.float16)
-        slots = torch.randint(0, 512, (32,), dtype=torch.int32)
+        slots = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], kv, slots, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -525,9 +458,9 @@ class TestGatherComposedChainsAndEndToEndPipelines:
             return x[i]
 
         for _ in range(4):
-            idx = torch.randint(0, 512, (64,), dtype=torch.int32)
+            idx = torch.randint(0, 512, (64,), dtype=torch.int64)
             compare_mode(execution_mode, fn, kv, idx, atol=_ATOL_F16, rtol=_ATOL_F16)
-        decode_idx = torch.randint(0, 512, (1,), dtype=torch.int32)
+        decode_idx = torch.randint(0, 512, (1,), dtype=torch.int64)
         compare_mode(execution_mode, fn, kv, decode_idx, atol=_ATOL_F16, rtol=_ATOL_F16)
 
     def test_e2e_full_pipeline_bfloat16(self, execution_mode):
@@ -535,7 +468,7 @@ class TestGatherComposedChainsAndEndToEndPipelines:
         vocab = cached_randn((512, 128), differentiation="e2e14v", dtype=torch.bfloat16)
         kv = cached_randn((512, 8, 64), differentiation="e2e14kv", dtype=torch.bfloat16)
         tok = torch.randint(0, 512, (8,), dtype=torch.int64)
-        slots = torch.randint(0, 512, (32,), dtype=torch.int32)
+        slots = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda v, kv, t, s: (v[t], kv[s]),

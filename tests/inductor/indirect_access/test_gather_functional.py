@@ -55,7 +55,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_gather_2d_basic_shapes(self, execution_mode, shape, P, diff_key):
         """Basic 2D gather across diverse (M, N) shapes and output sizes."""
         x = cached_randn(shape, differentiation=diff_key, dtype=torch.float16)
-        idx = torch.randint(0, shape[0], (P,), dtype=torch.int32)
+        idx = torch.randint(0, shape[0], (P,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -63,7 +63,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_gather_2d_non_power_of_2_inner(self, execution_mode):
         """N=100 not a multiple of 64; stick padding must not leak."""
         x = cached_randn((16, 100), differentiation="gfc06", dtype=torch.float16)
-        idx = torch.randint(0, 16, (8,), dtype=torch.int32)
+        idx = torch.randint(0, 16, (8,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -71,7 +71,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_gather_2d_full_range(self, execution_mode):
         """Index = full row permutation; every row accessed exactly once."""
         x = cached_randn((32, 64), differentiation="gfc07", dtype=torch.float16)
-        idx = torch.randperm(32, dtype=torch.int32)
+        idx = torch.randperm(32, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -79,13 +79,13 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_gather_2d_all_same_row(self, execution_mode):
         """All idx values = 0; repeated reads of row 0."""
         x = cached_randn((32, 64), differentiation="gfc08", dtype=torch.float16)
-        idx = torch.zeros(16, dtype=torch.int32)
+        idx = torch.zeros(16, dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_gather_2d_ascending_idx(self, execution_mode):
         """Sequential ascending idx [0..15]; cache-friendly access."""
         x = cached_randn((32, 128), differentiation="gfc09", dtype=torch.float16)
-        idx = torch.arange(16, dtype=torch.int32)
+        idx = torch.arange(16, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -93,7 +93,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_gather_2d_descending_idx(self, execution_mode):
         """Descending idx [31..16]; reverse access order."""
         x = cached_randn((32, 128), differentiation="gfc10", dtype=torch.float16)
-        idx = torch.arange(31, 15, -1, dtype=torch.int32)
+        idx = torch.arange(31, 15, -1, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -103,14 +103,14 @@ class TestGatherShapeRankAndIndexPatterns:
         x = cached_randn((32, 64), differentiation="gfc11", dtype=torch.float16)
         idx = torch.tensor(
             [0, 1, 2, 0, 1, 2, 3, 4, 5, 3, 4, 5, 6, 7, 8, 9, 6, 7, 8, 9],
-            dtype=torch.int32,
+            dtype=torch.int64,
         )
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_gather_3d_wide(self, execution_mode):
         """3D tensor (8,32,512), dim=0 gather, P=16."""
         x = cached_randn((8, 32, 512), differentiation="gfc12", dtype=torch.float16)
-        idx = torch.randint(0, 8, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 8, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -118,7 +118,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_gather_3d_small(self, execution_mode):
         """Smallest valid 3D tensor (4,4,16), sub-stick inner dims."""
         x = cached_randn((4, 4, 16), differentiation="gfc13", dtype=torch.float16)
-        idx = torch.randint(0, 4, (2,), dtype=torch.int32)
+        idx = torch.randint(0, 4, (2,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -139,7 +139,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_gather_4d_data(self, execution_mode):
         """4D tensor (2,8,4,64), gather at dim=0, P=4."""
         x = cached_randn((2, 8, 4, 64), differentiation="gfc15", dtype=torch.float16)
-        idx = torch.randint(0, 2, (4,), dtype=torch.int32)
+        idx = torch.randint(0, 2, (4,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -187,7 +187,7 @@ class TestGatherShapeRankAndIndexPatterns:
         """Integer-representable fp16 values (powers of 2); no rounding at output."""
         vals = [float(2**k) for k in range(64)]
         x = torch.tensor([vals] * 16, dtype=torch.float16)
-        idx = torch.randint(0, 16, (8,), dtype=torch.int32)
+        idx = torch.randint(0, 16, (8,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_gather_2d_interleaved_idx(self, execution_mode):
@@ -195,7 +195,7 @@ class TestGatherShapeRankAndIndexPatterns:
         x = cached_randn((32, 128), differentiation="gfc20", dtype=torch.float16)
         idx = torch.tensor(
             [v for pair in zip(range(16), range(16, 32)) for v in pair],
-            dtype=torch.int32,
+            dtype=torch.int64,
         )
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
@@ -206,7 +206,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_random_permutation(self, execution_mode):
         """Every row accessed exactly once via random permutation."""
         x = cached_randn((32, 128), differentiation="gidx01", dtype=torch.float16)
-        idx = torch.randperm(32, dtype=torch.int32)
+        idx = torch.randperm(32, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -215,7 +215,7 @@ class TestGatherShapeRankAndIndexPatterns:
         """80% of idx values point to the same row (heavy hotspot)."""
         x = cached_randn((32, 128), differentiation="gidx02", dtype=torch.float16)
         hot = [5] * 19 + [torch.randint(0, 32, (1,)).item() for _ in range(5)]
-        idx = torch.tensor(hot[:24], dtype=torch.int32)
+        idx = torch.tensor(hot[:24], dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -223,13 +223,13 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_alternating(self, execution_mode):
         """Alternates [0,1,0,1,...]; only 2 unique rows."""
         x = cached_randn((32, 64), differentiation="gidx03", dtype=torch.float16)
-        idx = torch.tensor([0, 1] * 8, dtype=torch.int32)
+        idx = torch.tensor([0, 1] * 8, dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_idx_strided(self, execution_mode):
         """Strided access [0,4,8,...]; stride=4 row selection."""
         x = cached_randn((64, 64), differentiation="gidx04", dtype=torch.float16)
-        idx = torch.arange(0, 64, 4, dtype=torch.int32)
+        idx = torch.arange(0, 64, 4, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -237,7 +237,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_near_full(self, execution_mode):
         """P=M-1=31; all rows except row 31."""
         x = cached_randn((32, 64), differentiation="gidx05", dtype=torch.float16)
-        idx = torch.arange(31, dtype=torch.int32)
+        idx = torch.arange(31, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -245,7 +245,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_oversize(self, execution_mode):
         """P=32 > M=16; each input row read multiple times."""
         x = cached_randn((16, 64), differentiation="gidx06", dtype=torch.float16)
-        idx = torch.randint(0, 16, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 16, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -253,7 +253,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_two_elements(self, execution_mode):
         """Minimal index P=2; smallest valid gather output."""
         x = cached_randn((32, 128), differentiation="gidx07", dtype=torch.float16)
-        idx = torch.randint(0, 32, (2,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (2,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -261,7 +261,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_single_row(self, execution_mode):
         """P=1 — single-element index; validates compile succeeds."""
         x = cached_randn((32, 256), differentiation="gidx08", dtype=torch.float16)
-        idx = torch.randint(0, 32, (1,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (1,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -269,13 +269,13 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_full_range(self, execution_mode):
         """Sequential [0..M-1]; identity-permutation gather."""
         x = cached_randn((32, 64), differentiation="gidx09", dtype=torch.float16)
-        idx = torch.arange(32, dtype=torch.int32)
+        idx = torch.arange(32, dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_idx_2d_shape(self, execution_mode):
         """2D-shaped index (8,4) on (16,64) value tensor."""
         x = cached_randn((16, 64), differentiation="gidx10", dtype=torch.float16)
-        idx = torch.randint(0, 16, (8, 4), dtype=torch.int32)
+        idx = torch.randint(0, 16, (8, 4), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -283,7 +283,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_sorted_ascending(self, execution_mode):
         """Sorted ascending [0..P-1]; cache-friendly pattern."""
         x = cached_randn((64, 128), differentiation="gidx11", dtype=torch.float16)
-        idx = torch.arange(32, dtype=torch.int32)
+        idx = torch.arange(32, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -291,7 +291,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_sorted_descending(self, execution_mode):
         """Reverse-sorted [P-1..0]; reverse cache pattern."""
         x = cached_randn((64, 128), differentiation="gidx12", dtype=torch.float16)
-        idx = torch.arange(31, -1, -1, dtype=torch.int32)
+        idx = torch.arange(31, -1, -1, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -301,7 +301,7 @@ class TestGatherShapeRankAndIndexPatterns:
         x = cached_randn((32, 64), differentiation="gidx13", dtype=torch.float16)
         idx = torch.tensor(
             [0, 31, 5, 10, 15, 20, 25, 3, 8, 13, 18, 23, 28, 1, 16, 30],
-            dtype=torch.int32,
+            dtype=torch.int64,
         )
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
@@ -310,7 +310,7 @@ class TestGatherShapeRankAndIndexPatterns:
     def test_idx_repeated_pairs(self, execution_mode):
         """Each row appears twice consecutively [0,0,1,1,2,2,...]."""
         x = cached_randn((16, 64), differentiation="gidx14", dtype=torch.float16)
-        idx = torch.tensor([v for v in range(8) for _ in range(2)], dtype=torch.int32)
+        idx = torch.tensor([v for v in range(8) for _ in range(2)], dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     # ------------------------------------------------------------------

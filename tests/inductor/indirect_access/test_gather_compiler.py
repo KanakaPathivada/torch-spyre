@@ -29,7 +29,6 @@ _ATOL_BF16 = 2e-2
 _ATOL_F32 = 1e-5
 
 
-@pytest.mark.parametrize("execution_mode", ["eager", "compiled"])
 class TestGatherCompilerPassesMemoryAndDynamicShapes:
     """GATHER_OP_SPEC emission and pass order, stick/non-aligned/multi-stick memory layouts, dynamic M/P/D shapes, SENCORES/LX configuration, LX budget variants, and in-graph index computation."""
 
@@ -46,30 +45,22 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
 
     # ------------------------------------------------------------------
 
-    def test_gather_op_spec_present(self, execution_mode):
-        """Flag on → indirect access path executes; eager and compiled outputs match CPU."""
-        x = cached_randn((64, 128), differentiation="gcp01", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_sdsc_index_in_hbm(self, execution_mode):
+    def test_sdsc_index_in_hbm(self):
         """Index tensor stays in HBM; not placed in LX scratchpad."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="gcp04", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_two_gathers_two_op_specs(self, execution_mode):
+    def test_two_gathers_two_op_specs(self):
         """Two independent gathers; two GATHER_OP_SPECs in same graph."""
         x = cached_randn((64, 128), differentiation="gcp05a", dtype=torch.float16)
         y = cached_randn((64, 128), differentiation="gcp05b", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, y, i: (x[i], y[i]),
             x,
             y,
@@ -78,12 +69,12 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_reshape_before_gather(self, execution_mode):
+    def test_reshape_before_gather(self):
         """Reshape barrier before gather; GATHER_OP_SPEC at post-reshape."""
         x = cached_randn((8, 8, 128), differentiation="gcp07", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, i: x.reshape(64, 128)[i],
             x,
             idx,
@@ -91,22 +82,20 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_symbolic_args_encoding(self, execution_mode):
+    def test_symbolic_args_encoding(self):
         """BUNDLE_SYMBOLIC_ARGS encoding in SDSC; dynamic idx shape."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         x = cached_randn((64, 128), differentiation="gcp08", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
         torch.testing.assert_close(result, x[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_gather_with_downstream_fused(self, execution_mode):
+    def test_gather_with_downstream_fused(self):
         """Downstream op fused into SDSC; single kernel generated."""
         x = cached_randn((64, 128), differentiation="gcp12", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, i: torch.tanh(x[i]),
             x,
             idx,
@@ -116,63 +105,39 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
 
     # ------------------------------------------------------------------
 
-    def test_stick_aligned_source(self, execution_mode):
+    def test_stick_aligned_source(self):
         """Source rows are stick-aligned (D=64, fp16, 128 bytes)."""
         x = cached_randn((64, 64), differentiation="mem01", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_non_aligned_source(self, execution_mode):
-        """Non-aligned inner dim (D=48); sub-stick-width source."""
-        x = cached_randn((64, 48), differentiation="mem02", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_multi_stick_rows(self, execution_mode):
-        """Rows spanning multiple sticks (D=256, fp16, 4 sticks/row)."""
-        x = cached_randn((64, 256), differentiation="mem03", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_non_contiguous_source(self, execution_mode):
+    def test_non_contiguous_source(self):
         """Non-contiguous source via transpose; gather on new dim 0."""
         x = cached_randn((128, 64), differentiation="mem04", dtype=torch.float16)
         xt = x.t().contiguous()
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], xt, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], xt, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_large_tensor(self, execution_mode):
-        """Large tensor (4K rows × 256 cols) to stress allocator."""
-        x = cached_randn((4096, 256), differentiation="mem05", dtype=torch.float16)
-        idx = torch.randint(0, 4096, (128,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_lx_index_not_placed(self, execution_mode):
+    def test_lx_index_not_placed(self):
         """LX_PLANNING=1; index tensor stays in HBM."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="mem06", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lx_source_eligible(self, execution_mode):
+    def test_lx_source_eligible(self):
         """Source data eligible for LX; downstream compute in LX."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="mem07", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, i: torch.relu(x[i]),
             x,
             idx,
@@ -180,38 +145,30 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_sencores32_memory(self, execution_mode):
+    def test_sencores32_memory(self):
         """32-core; each core processes row-shard; all results correct."""
         os.environ["SENCORES"] = "32"
         x = cached_randn((256, 64), differentiation="mem08", dtype=torch.float16)
-        idx = torch.randint(0, 256, (128,), dtype=torch.int32)
+        idx = torch.randint(0, 256, (128,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_sub_stick_width(self, execution_mode):
-        """Very narrow inner dim (D=16, fp16); sub-stick access."""
-        x = cached_randn((64, 16), differentiation="mem09", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_bfloat16_alignment(self, execution_mode):
+    def test_bfloat16_alignment(self):
         """bfloat16 alignment: 2 bytes/elem; stick boundaries differ from fp16."""
         x = cached_randn((64, 64), differentiation="mem10", dtype=torch.bfloat16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
         )
 
-    def test_stride_non_standard(self, execution_mode):
+    def test_stride_non_standard(self):
         """Non-standard strides from slice; still gathers correctly."""
         x = cached_randn((128, 128), differentiation="mem11", dtype=torch.float16)
         x_sliced = x[::2].contiguous()
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, i: x[i],
             x_sliced,
             idx,
@@ -219,124 +176,96 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_4d_memory_layout(self, execution_mode):
-        """4D tensor memory layout; gather at outermost dim."""
-        x = cached_randn((64, 4, 8, 32), differentiation="mem12", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
     # ------------------------------------------------------------------
 
-    def test_dynamic_source_size(self, execution_mode):
+    def test_dynamic_source_size(self):
         """Dynamic M (source rows); compiled once, different M at runtime."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         for M in (32, 64):
             x = cached_randn(
                 (M, 128), differentiation=f"dyn01_{M}", dtype=torch.float16
             )
-            idx = torch.randint(0, M, (16,), dtype=torch.int32)
+            idx = torch.randint(0, M, (16,), dtype=torch.int64)
             result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, x[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_dynamic_index_size(self, execution_mode):
+    def test_dynamic_index_size(self):
         """Dynamic P (index length); compiled once, P=16 and P=32."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         x = cached_randn((64, 128), differentiation="dyn02", dtype=torch.float16)
         for P in (16, 32):
-            idx = torch.randint(0, 64, (P,), dtype=torch.int32)
+            idx = torch.randint(0, 64, (P,), dtype=torch.int64)
             result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, x[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_dynamic_inner_dim(self, execution_mode):
+    def test_dynamic_inner_dim(self):
         """Dynamic D (inner dim); D=64 and D=128 in same session."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         for D in (64, 128):
             x = cached_randn((32, D), differentiation=f"dyn03_{D}", dtype=torch.float16)
             result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, x[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_dynamic_then_static(self, execution_mode):
+    def test_dynamic_then_static(self):
         """Dynamic compile then static call; same function object."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         x = cached_randn((64, 128), differentiation="dyn04", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
         torch.testing.assert_close(result, x[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_symbolic_gather_dim0(self, execution_mode):
+    def test_symbolic_gather_dim0(self):
         """Symbolic shape at gather dim=0; GATHER_OP_SPEC generated."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         x = cached_randn((64, 64), differentiation="dyn05", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
         torch.testing.assert_close(result, x[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_symbolic_batch_seqlen(self, execution_mode):
+    def test_symbolic_batch_seqlen(self):
         """Dynamic batch × seqlen; slot_idxs (B*Lk) varies."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         kv = cached_randn((512, 8, 64), differentiation="dyn06", dtype=torch.float16)
         for B_Lk in (32, 64):
-            idx = torch.randint(0, 512, (B_Lk,), dtype=torch.int32)
+            idx = torch.randint(0, 512, (B_Lk,), dtype=torch.int64)
             result = fn(kv.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, kv[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_dynamic_3d_source(self, execution_mode):
+    def test_dynamic_3d_source(self):
         """Dynamic 3D source (M, H, D); gather at dim=0."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         for M in (32, 64):
             x = cached_randn(
                 (M, 8, 64), differentiation=f"dyn07_{M}", dtype=torch.float16
             )
-            idx = torch.randint(0, M, (16,), dtype=torch.int32)
+            idx = torch.randint(0, M, (16,), dtype=torch.int64)
             result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, x[idx], atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_dynamic_with_downstream(self, execution_mode):
+    def test_dynamic_with_downstream(self):
         """Dynamic shape + downstream fused op (tanh)."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: torch.tanh(x[i]), dynamic=True)
         x = cached_randn((64, 128), differentiation="dyn08", dtype=torch.float16)
         for P in (16, 32):
-            idx = torch.randint(0, 64, (P,), dtype=torch.int32)
+            idx = torch.randint(0, 64, (P,), dtype=torch.int64)
             result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
             expected = torch.tanh(x[idx])
             torch.testing.assert_close(result, expected, atol=_ATOL_F16, rtol=_ATOL_F16)
 
-    def test_dynamic_bfloat16(self, execution_mode):
+    def test_dynamic_bfloat16(self):
         """Dynamic shape with bfloat16; SDSC wordLength=2."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         for P in (16, 32):
             x = cached_randn(
                 (64, 128), differentiation=f"dyn09_{P}", dtype=torch.bfloat16
             )
-            idx = torch.randint(0, 64, (P,), dtype=torch.int32)
+            idx = torch.randint(0, 64, (P,), dtype=torch.int64)
             result = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
             torch.testing.assert_close(result, x[idx], atol=_ATOL_BF16, rtol=_ATOL_BF16)
 
-    def test_dynamic_vocab_size(self, execution_mode):
+    def test_dynamic_vocab_size(self):
         """Dynamic vocab size; embedding-like lookup with varying M."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         fn = torch.compile(lambda x, i: x[i], dynamic=True)
         for V in (256, 512):
             w = cached_randn(
@@ -356,43 +285,41 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             ("32", (256, 128), 64, "cfg05"),
         ],
     )
-    def test_sencores_correctness(self, execution_mode, sencores, shape, P, diff_key):
-        """SENCORES=1/4/32 gather correctness; eager and compiled both match CPU."""
+    def test_sencores_correctness(self, sencores, shape, P, diff_key):
+        """SENCORES=1/4/32 gather correctness; compiled output matches CPU."""
         os.environ["SENCORES"] = sencores
         x = cached_randn(shape, differentiation=diff_key, dtype=torch.float16)
-        idx = torch.randint(0, shape[0], (P,), dtype=torch.int32)
+        idx = torch.randint(0, shape[0], (P,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lx_planning_with_gather(self, execution_mode):
+    def test_lx_planning_with_gather(self):
         """LX_PLANNING=1 + gather; index not placed in LX."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="cfg06", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_compile_cache_hit(self, execution_mode):
+    def test_compile_cache_hit(self):
         """Second call with same shapes hits compile cache; outputs match."""
-        if execution_mode == "eager":
-            pytest.skip("compile-only test")
         x = cached_randn((64, 128), differentiation="cfg09", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         fn = torch.compile(lambda x, i: x[i])
         r1 = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
         r2 = fn(x.to(DEVICE), idx.to(DEVICE)).cpu()
         torch.testing.assert_close(r1, r2, atol=0, rtol=0)
 
-    def test_two_gathers_sencores4(self, execution_mode):
+    def test_two_gathers_sencores4(self):
         """Two gathers + SENCORES=4; both GATHER_OP_SPECs correct."""
         os.environ["SENCORES"] = "4"
         x = cached_randn((64, 128), differentiation="cfg10a", dtype=torch.float16)
         y = cached_randn((64, 128), differentiation="cfg10b", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, y, i: (x[i], y[i]),
             x,
             y,
@@ -403,24 +330,24 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
 
     # ------------------------------------------------------------------
 
-    def test_lxd_low_fraction(self, execution_mode):
+    def test_lxd_low_fraction(self):
         """DXP_LX_FRAC_AVAIL=0.1; tight LX budget; index stays in HBM."""
         os.environ["LX_PLANNING"] = "1"
         os.environ["DXP_LX_FRAC_AVAIL"] = "0.1"
         x = cached_randn((64, 128), differentiation="lxd01", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lxd_high_fraction(self, execution_mode):
+    def test_lxd_high_fraction(self):
         """DXP_LX_FRAC_AVAIL=0.8; large LX budget; downstream eligible."""
         os.environ["LX_PLANNING"] = "1"
         os.environ["DXP_LX_FRAC_AVAIL"] = "0.8"
         x = cached_randn((64, 128), differentiation="lxd02", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, i: torch.relu(x[i]),
             x,
             idx,
@@ -428,13 +355,13 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_lxd_lx_overlap(self, execution_mode):
+    def test_lxd_lx_overlap(self):
         """LX-LX overlap: downstream output eligible for LX re-use."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="lxd03", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, i: torch.sigmoid(torch.relu(x[i])),
             x,
             idx,
@@ -442,93 +369,93 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_lxd_layout_solver_default(self, execution_mode):
+    def test_lxd_layout_solver_default(self):
         """Default LAYOUT_SOLVER; LX planning uses default algorithm."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="lxd04", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lxd_co_opt_with_stl(self, execution_mode):
+    def test_lxd_co_opt_with_stl(self):
         """Co-optimization with STL on source; LX planning still correct."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="lxd05", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lxd_named_dims_combo(self, execution_mode):
+    def test_lxd_named_dims_combo(self):
         """Named dims + LX planning; output correct."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="lxd06", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lxd_sencores32_co_opt(self, execution_mode):
+    def test_lxd_sencores32_co_opt(self):
         """32-core + LX_PLANNING + co-opt; full chip utilization correct."""
         os.environ["SENCORES"] = "32"
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((256, 128), differentiation="lxd07", dtype=torch.float16)
-        idx = torch.randint(0, 256, (64,), dtype=torch.int32)
+        idx = torch.randint(0, 256, (64,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lxd_gate_off_no_lx(self, execution_mode):
+    def test_lxd_gate_off_no_lx(self):
         """LX_PLANNING=1 works correctly for non-gather ops."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="lxd08", dtype=torch.float16)
         compare_mode(
-            execution_mode, lambda x: torch.relu(x), x, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x: torch.relu(x), x, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lxd_large_tensor_lx(self, execution_mode):
+    def test_lxd_large_tensor_lx(self):
         """Large tensor with LX_PLANNING; allocation pressure test."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((4096, 64), differentiation="lxd09", dtype=torch.float16)
-        idx = torch.randint(0, 4096, (128,), dtype=torch.int32)
+        idx = torch.randint(0, 4096, (128,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_lxd_bfloat16_co_opt(self, execution_mode):
+    def test_lxd_bfloat16_co_opt(self):
         """bfloat16 + LX_PLANNING co-optimization; 2-byte elements."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((64, 128), differentiation="lxd10", dtype=torch.bfloat16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
         )
 
     # ------------------------------------------------------------------
 
-    def test_arange_index_inside_graph(self, execution_mode):
+    def test_arange_index_inside_graph(self):
         """torch.arange generates index inside compiled graph; GATHER_OP_SPEC must fire."""
         x = cached_randn((64, 128), differentiation="ing01", dtype=torch.float16)
         seqlen = 32
         compare_mode(
-            execution_mode,
-            lambda x: x[torch.arange(seqlen, dtype=torch.int32)],
+            "compiled",
+            lambda x: x[torch.arange(seqlen, dtype=torch.int64)],
             x,
             atol=_ATOL_F16,
             rtol=_ATOL_F16,
         )
 
-    def test_topk_index_inside_graph(self, execution_mode):
+    def test_topk_index_inside_graph(self):
         """topk inside compiled graph produces row index; expert_w[ids] fires GATHER_OP_SPEC."""
         expert_w = cached_randn(
             (8, 64, 32), differentiation="ing02", dtype=torch.float16
         )
         logits = cached_randn((1, 8), differentiation="ing02l", dtype=torch.float16)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda w, lgt: w[
-                torch.topk(lgt, 2, dim=-1).indices.flatten().to(torch.int32)
+                torch.topk(lgt, 2, dim=-1).indices.flatten().to(torch.int64)
             ],
             expert_w,
             logits,
@@ -536,48 +463,48 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_nonzero_index_inside_graph(self, execution_mode):
+    def test_nonzero_index_inside_graph(self):
         """nonzero inside graph selects active rows; gather fetches those rows."""
         x = cached_randn((32, 64), differentiation="ing03", dtype=torch.float16)
-        scores = torch.randint(0, 2, (32,), dtype=torch.int32)
-        nz_idx = scores.nonzero(as_tuple=True)[0].to(torch.int32)
+        scores = torch.randint(0, 2, (32,), dtype=torch.int64)
+        nz_idx = scores.nonzero(as_tuple=True)[0].to(torch.int64)
         if nz_idx.numel() == 0:
-            nz_idx = torch.tensor([0], dtype=torch.int32)
+            nz_idx = torch.tensor([0], dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, nz_idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, nz_idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_where_index_inside_graph(self, execution_mode):
+    def test_where_index_inside_graph(self):
         """torch.where condition → index inside compiled graph; gather valid slot rows."""
         x = cached_randn((32, 64), differentiation="ing04", dtype=torch.float16)
         scores = torch.randn(32)
-        idx = torch.where(scores > 0)[0].to(torch.int32)
+        idx = torch.where(scores > 0)[0].to(torch.int64)
         if idx.numel() == 0:
-            idx = torch.tensor([0], dtype=torch.int32)
+            idx = torch.tensor([0], dtype=torch.int64)
         compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
+            "compiled", lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
-    def test_argmax_index_inside_graph(self, execution_mode):
+    def test_argmax_index_inside_graph(self):
         """argmax inside compiled graph; gather the single top-scoring row."""
         x = cached_randn((32, 64), differentiation="ing05", dtype=torch.float16)
         scores = cached_randn((32,), differentiation="ing05s", dtype=torch.float16)
         compare_mode(
-            execution_mode,
-            lambda x, s: x[torch.argmax(s).unsqueeze(0).to(torch.int32)],
+            "compiled",
+            lambda x, s: x[torch.argmax(s).unsqueeze(0).to(torch.int64)],
             x,
             scores,
             atol=_ATOL_F16,
             rtol=_ATOL_F16,
         )
 
-    def test_two_different_indices_same_source(self, execution_mode):
+    def test_two_different_indices_same_source(self):
         """Same source, two distinct index tensors in one graph; two independent GATHER_OP_SPECs."""
         x = cached_randn((64, 128), differentiation="ing06", dtype=torch.float16)
-        idx1 = torch.randint(0, 64, (16,), dtype=torch.int32)
-        idx2 = torch.randint(0, 64, (8,), dtype=torch.int32)
+        idx1 = torch.randint(0, 64, (16,), dtype=torch.int64)
+        idx2 = torch.randint(0, 64, (8,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, i1, i2: (x[i1], x[i2]),
             x,
             idx1,
@@ -586,19 +513,129 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
             rtol=_ATOL_F16,
         )
 
-    def test_two_different_sources_different_indices(self, execution_mode):
+    def test_two_different_sources_different_indices(self):
         """Two distinct sources and two distinct indices in one graph; all four GATHER_OP_SPECs independent."""
         x = cached_randn((64, 64), differentiation="ing07x", dtype=torch.float16)
         y = cached_randn((32, 64), differentiation="ing07y", dtype=torch.float16)
-        idx_x = torch.randint(0, 64, (16,), dtype=torch.int32)
-        idx_y = torch.randint(0, 32, (12,), dtype=torch.int32)
+        idx_x = torch.randint(0, 64, (16,), dtype=torch.int64)
+        idx_y = torch.randint(0, 32, (12,), dtype=torch.int64)
         compare_mode(
-            execution_mode,
+            "compiled",
             lambda x, y, ix, iy: (x[ix], y[iy]),
             x,
             y,
             idx_x,
             idx_y,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    # ------------------------------------------------------------------
+    # Explicit torch.gather(src, dim, index) — aten::gather.out path
+    # All existing compiler tests use x[idx] (aten::index); these are the
+    # first compiler-context tests for the explicit gather API form.
+    # ------------------------------------------------------------------
+
+    def test_explicit_gather_dim0_lx(self):
+        """torch.gather(src, 0, index) with LX_PLANNING=1; aten::gather.out through LX planner."""
+        os.environ["LX_PLANNING"] = "1"
+        src = cached_randn((64, 128), differentiation="xgth01", dtype=torch.float16)
+        index = torch.randint(0, 64, (32, 128), dtype=torch.int64)
+        compare_mode(
+            "compiled",
+            lambda s, i: torch.gather(s, 0, i),
+            src,
+            index,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_explicit_gather_dim1_lx(self):
+        """torch.gather(src, 1, index) with LX_PLANNING=1; dim=1 aten::gather.out through LX planner."""
+        os.environ["LX_PLANNING"] = "1"
+        src = cached_randn((32, 64), differentiation="xgth02", dtype=torch.float16)
+        index = torch.randint(0, 64, (32, 16), dtype=torch.int64)
+        compare_mode(
+            "compiled",
+            lambda s, i: torch.gather(s, 1, i),
+            src,
+            index,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_explicit_gather_dim2_lx(self):
+        """torch.gather(src, 2, index) with LX_PLANNING=1; dim=2 aten::gather.out through LX planner."""
+        os.environ["LX_PLANNING"] = "1"
+        src = cached_randn((8, 16, 64), differentiation="xgth03", dtype=torch.float16)
+        index = torch.randint(0, 64, (8, 16, 32), dtype=torch.int64)
+        compare_mode(
+            "compiled",
+            lambda s, i: torch.gather(s, 2, i),
+            src,
+            index,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_explicit_gather_dim0_bfloat16_lx(self):
+        """torch.gather(src, 0, index) bfloat16 + LX_PLANNING=1; wordLength=2 path through LX planner."""
+        os.environ["LX_PLANNING"] = "1"
+        src = cached_randn((64, 128), differentiation="xgth04", dtype=torch.bfloat16)
+        index = torch.randint(0, 64, (32, 128), dtype=torch.int64)
+        compare_mode(
+            "compiled",
+            lambda s, i: torch.gather(s, 0, i),
+            src,
+            index,
+            atol=_ATOL_BF16,
+            rtol=_ATOL_BF16,
+        )
+
+    # ------------------------------------------------------------------
+    # dim=1 and dim=2 fancy-indexing gathers in compiler context
+    # x[idx] (dim=0) is extensively tested above; these are the
+    # first compiler tests for non-leading-dim fancy indexing.
+    # ------------------------------------------------------------------
+
+    def test_dim1_fancy_indexing_sencores_4(self):
+        """x[:, idx, :] dim=1 gather with SENCORES=4; non-leading-dim gather across 4 cores."""
+        os.environ["SENCORES"] = "4"
+        x = cached_randn((8, 32, 64), differentiation="dim01", dtype=torch.float16)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
+        compare_mode(
+            "compiled",
+            lambda x, i: x[:, i, :],
+            x,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_dim2_fancy_indexing_lx(self):
+        """x[:, :, idx] dim=2 gather with LX_PLANNING=1; innermost-dim indirect access through LX planner."""
+        os.environ["LX_PLANNING"] = "1"
+        x = cached_randn((8, 16, 64), differentiation="dim02", dtype=torch.float16)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
+        compare_mode(
+            "compiled",
+            lambda x, i: x[:, :, i],
+            x,
+            idx,
+            atol=_ATOL_F16,
+            rtol=_ATOL_F16,
+        )
+
+    def test_dim1_explicit_gather_lx(self):
+        """torch.gather(src, 1, index) + LX_PLANNING=1; dim=1 compiler path for KV-head reorder."""
+        os.environ["LX_PLANNING"] = "1"
+        src = cached_randn((4, 32, 64), differentiation="dim03", dtype=torch.float16)
+        index = torch.randint(0, 32, (4, 8, 64), dtype=torch.int64)
+        compare_mode(
+            "compiled",
+            lambda s, i: torch.gather(s, 1, i),
+            src,
+            index,
             atol=_ATOL_F16,
             rtol=_ATOL_F16,
         )

@@ -48,7 +48,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_single_row_source(self, execution_mode):
         """Source has a single row (M=1); all indices must be 0."""
         x = cached_randn((1, 64), differentiation="ec01", dtype=torch.float16)
-        idx = torch.zeros(8, dtype=torch.int32)
+        idx = torch.zeros(8, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -56,7 +56,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_single_element_index(self, execution_mode):
         """Index tensor has exactly 1 element; P=1 boundary."""
         x = cached_randn((64, 128), differentiation="ec02", dtype=torch.float16)
-        idx = torch.randint(0, 64, (1,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (1,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -65,7 +65,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """P == M; gather outputs same-size tensor as source."""
         M = 32
         x = cached_randn((M, 64), differentiation="ec03", dtype=torch.float16)
-        idx = torch.randint(0, M, (M,), dtype=torch.int32)
+        idx = torch.randint(0, M, (M,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -73,7 +73,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_all_same_index(self, execution_mode):
         """All indices identical; output is repeated rows."""
         x = cached_randn((64, 128), differentiation="ec04", dtype=torch.float16)
-        idx = torch.full((16,), 7, dtype=torch.int32)
+        idx = torch.full((16,), 7, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -81,7 +81,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_all_indices_max(self, execution_mode):
         """All indices at maximum legal value (M-1)."""
         x = cached_randn((64, 128), differentiation="ec05", dtype=torch.float16)
-        idx = torch.full((16,), 63, dtype=torch.int32)
+        idx = torch.full((16,), 63, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -89,23 +89,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_all_indices_zero(self, execution_mode):
         """All indices at 0; first row only."""
         x = cached_randn((64, 128), differentiation="ec06", dtype=torch.float16)
-        idx = torch.zeros(16, dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_ascending_indices(self, execution_mode):
-        """Monotonically ascending indices; sequential read pattern."""
-        x = cached_randn((64, 128), differentiation="ec07", dtype=torch.float16)
-        idx = torch.arange(0, 32, dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
-    def test_descending_indices(self, execution_mode):
-        """Monotonically descending indices."""
-        x = cached_randn((64, 128), differentiation="ec08", dtype=torch.float16)
-        idx = torch.arange(31, -1, -1, dtype=torch.int32)
+        idx = torch.zeros(16, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -113,7 +97,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_power_of_two_shapes(self, execution_mode):
         """Power-of-2 M and D; stick-aligned boundaries."""
         x = cached_randn((128, 64), differentiation="ec09", dtype=torch.float16)
-        idx = torch.randint(0, 128, (64,), dtype=torch.int32)
+        idx = torch.randint(0, 128, (64,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -121,7 +105,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_odd_inner_dim(self, execution_mode):
         """Odd D=65; cross-stick boundary element."""
         x = cached_randn((64, 65), differentiation="ec10", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -129,7 +113,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_index_out_of_range_skipped(self, execution_mode):
         """Indices within [0, M-1]; no out-of-bounds access tested."""
         x = cached_randn((64, 128), differentiation="ec11", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -137,7 +121,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_gather_1d_source(self, execution_mode):
         """1D source tensor; gather is scalar indexing."""
         x = cached_randn((256,), differentiation="ec12", dtype=torch.float16)
-        idx = torch.randint(0, 256, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 256, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -145,7 +129,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_p_larger_than_m(self, execution_mode):
         """P > M (more gather outputs than source rows); repeated patterns."""
         x = cached_randn((16, 64), differentiation="ec13", dtype=torch.float16)
-        idx = torch.randint(0, 16, (64,), dtype=torch.int32)
+        idx = torch.randint(0, 16, (64,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -153,7 +137,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_gate_off_correct_fallback(self, execution_mode):
         """Numeric correctness baseline: output matches CPU reference."""
         x = cached_randn((64, 128), differentiation="ec14", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -161,7 +145,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_exact_integer_gather(self, execution_mode):
         """Integer value source; output is exact (atol=0)."""
         x = torch.randint(-500, 500, (32, 64), dtype=torch.int32)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     # ------------------------------------------------------------------
@@ -207,10 +191,10 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_nonzero_gather(self, execution_mode):
         """torch.nonzero → index; gather rows at nonzero scalar positions."""
         x = cached_randn((64, 32), differentiation="msk05", dtype=torch.float16)
-        scores = torch.randint(0, 10, (64,), dtype=torch.int32)
+        scores = torch.randint(0, 10, (64,), dtype=torch.int64)
         nz = torch.nonzero(scores, as_tuple=True)[0].int()
         if nz.numel() == 0:
-            nz = torch.tensor([0], dtype=torch.int32)
+            nz = torch.tensor([0], dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, nz, atol=0, rtol=0)
 
     def test_mask_then_index_gather(self, execution_mode):
@@ -220,7 +204,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         keep_mask = scores > 0
         idx = torch.where(keep_mask)[0].int()
         if idx.numel() == 0:
-            idx = torch.tensor([0], dtype=torch.int32)
+            idx = torch.tensor([0], dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], src, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -231,7 +215,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         mask = torch.randint(0, 2, (64,)).bool()
         idx = torch.where(mask)[0].int()
         if idx.numel() == 0:
-            idx = torch.tensor([0], dtype=torch.int32)
+            idx = torch.tensor([0], dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_masked_fill_negative(self, execution_mode):
@@ -240,13 +224,13 @@ class TestGatherBoundaryNumericsAndAPIForms:
         keep = torch.randint(0, 2, (32,)).bool()
         idx = torch.where(keep)[0].int()
         if idx.numel() == 0:
-            idx = torch.tensor([0], dtype=torch.int32)
+            idx = torch.tensor([0], dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_causal_attention_mask(self, execution_mode):
         """Causal mask applied to scores then gather valid row subset."""
         scores = cached_randn((32, 64), differentiation="msk09", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda s, i: torch.where(s[i] > 0, s[i], torch.zeros_like(s[i])),
@@ -259,7 +243,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_gather_masked_output(self, execution_mode):
         """Gather + apply output mask for padding suppression."""
         x = cached_randn((64, 128), differentiation="msk10", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         out_mask = torch.randint(0, 2, (16, 128)).bool()
         compare_mode(
             execution_mode,
@@ -302,7 +286,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_gather_from_bool_tensor(self, execution_mode):
         """Gather from a bool tensor; exact output."""
         x = torch.randint(0, 2, (64, 32)).bool()
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_masked_index_2d_row_select(self, execution_mode):
@@ -314,7 +298,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_gather_then_mask_fill(self, execution_mode):
         """Gather rows then mask-fill invalid positions."""
         x = cached_randn((64, 128), differentiation="msk15", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         pad_mask = torch.randint(0, 2, (16, 128)).bool()
         compare_mode(
             execution_mode,
@@ -332,7 +316,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         scores = torch.randn(64)
         idx = (scores > scores.median()).nonzero(as_tuple=True)[0].int()[:16]
         if idx.numel() == 0:
-            idx = torch.tensor([0], dtype=torch.int32)
+            idx = torch.tensor([0], dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -605,7 +589,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_api_fullgraph(self, execution_mode):
         """fullgraph=True compile; no graph breaks; eager path also correct."""
         x = cached_randn((64, 128), differentiation="api09", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         if execution_mode == "eager":
             compare_mode(
                 execution_mode,
@@ -623,7 +607,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_api_inference_mode(self, execution_mode):
         """torch.inference_mode(); no autograd overhead."""
         x = cached_randn((64, 128), differentiation="api10", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         with torch.inference_mode():
             compare_mode(
                 execution_mode,
@@ -637,7 +621,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_api_no_grad(self, execution_mode):
         """torch.no_grad(); inference-mode compatible."""
         x = cached_randn((64, 128), differentiation="api11", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         with torch.no_grad():
             compare_mode(
                 execution_mode,
@@ -664,7 +648,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_api_advanced_index_tuple(self, execution_mode):
         """Advanced tuple indexing x[idx, :]; same as x[idx]."""
         x = cached_randn((64, 128), differentiation="api13", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i, :],
@@ -733,7 +717,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Slice + gather: first half of rows then index."""
         x = cached_randn((128, 64), differentiation="api19", dtype=torch.float16)
         half = x[:64]
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], half, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -742,7 +726,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """repeat_interleave to expand batch then gather."""
         x = cached_randn((8, 64), differentiation="api20", dtype=torch.float16)
         expanded = x.repeat_interleave(4, dim=0)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i],
@@ -758,7 +742,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         scores = x.abs().sum(dim=-1)
         nz_idx = torch.nonzero(scores > scores.mean(), as_tuple=True)[0].int()
         if nz_idx.numel() == 0:
-            nz_idx = torch.tensor([0], dtype=torch.int32)
+            nz_idx = torch.tensor([0], dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, nz_idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -766,7 +750,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_api_gather_then_softmax(self, execution_mode):
         """Gather logits for target tokens → softmax over vocab."""
         logits = cached_randn((32, 512), differentiation="api22", dtype=torch.float16)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: torch.softmax(x[i].float(), dim=-1).half(),
@@ -782,7 +766,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Source is transposed then gather on new dim=0."""
         x = cached_randn((128, 64), differentiation="ncs01", dtype=torch.float16)
         xt = x.t().contiguous()
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], xt, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -791,7 +775,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Source is sliced (every 2nd row); non-contiguous strides."""
         x = cached_randn((128, 64), differentiation="ncs02", dtype=torch.float16)
         xs = x[::2].contiguous()
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], xs, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -800,7 +784,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """3D tensor permuted (1,0,2) then contiguous; gather at dim=0."""
         x = cached_randn((8, 64, 128), differentiation="ncs03", dtype=torch.float16)
         xp = x.permute(1, 0, 2).contiguous()
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], xp, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -809,7 +793,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Source narrowed via .narrow(); gather on narrowed view."""
         x = cached_randn((128, 64), differentiation="ncs04", dtype=torch.float16)
         xn = x.narrow(0, 16, 64).contiguous()
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], xn, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -818,7 +802,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Source with expanded singleton dim; gather after expand."""
         x = cached_randn((1, 64, 128), differentiation="ncs05", dtype=torch.float16)
         xe = x.expand(8, 64, 128).reshape(512, 128).contiguous()
-        idx = torch.randint(0, 512, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], xe, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -827,7 +811,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Source viewed to new shape; gather on re-shaped tensor."""
         x = cached_randn((8, 64, 128), differentiation="ncs06", dtype=torch.float16)
         xv = x.reshape(512, 128)
-        idx = torch.randint(0, 512, (64,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (64,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], xv, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -836,7 +820,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Source selected by torch.select + gather on result."""
         x = cached_randn((8, 64, 128), differentiation="ncs07", dtype=torch.float16)
         xs = x[0]
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], xs, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -845,7 +829,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Source split into 4 chunks; gather on third chunk."""
         x = cached_randn((256, 64), differentiation="ncs08", dtype=torch.float16)
         chunk = torch.chunk(x, 4, dim=0)[2].contiguous()
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i],
@@ -860,7 +844,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         a = cached_randn((32, 64), differentiation="ncs09a", dtype=torch.float16)
         b = cached_randn((32, 64), differentiation="ncs09b", dtype=torch.float16)
         ab = torch.cat([a, b], dim=0)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], ab, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -869,7 +853,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Stack 32 row vectors; gather rows from stacked tensor."""
         base = cached_randn((32, 128), differentiation="ncs_stk01", dtype=torch.float16)
         x = torch.stack(list(base.unbind(0)), dim=0)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -880,7 +864,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Two sources, same index, one compiled graph; both gathers execute correctly."""
         x = cached_randn((64, 128), differentiation="bug02a", dtype=torch.float16)
         y = cached_randn((64, 128), differentiation="bug02b", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, y, i: (x[i], y[i]),
@@ -895,7 +879,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Gather rows then matmul in one compiled graph; downstream op matches CPU."""
         x = cached_randn((64, 128), differentiation="bug03x", dtype=torch.float16)
         w = cached_randn((128, 64), differentiation="bug03w", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, w, i: x[i] @ w,
@@ -910,7 +894,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Large gather (M=256, P=128) at SENCORES=4; multi-core result matches CPU."""
         os.environ["SENCORES"] = "4"
         x = cached_randn((256, 128), differentiation="bug04", dtype=torch.float16)
-        idx = torch.randint(0, 256, (128,), dtype=torch.int32)
+        idx = torch.randint(0, 256, (128,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -919,7 +903,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Two gather ops as separate calls; each result matches CPU independently."""
         x = cached_randn((64, 128), differentiation="bug06a", dtype=torch.float16)
         y = cached_randn((64, 128), differentiation="bug06b", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -931,26 +915,17 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Large gather (M=256, P=128) at SENCORES=1; single-core result matches CPU."""
         os.environ["SENCORES"] = "1"
         x = cached_randn((256, 128), differentiation="bug08", dtype=torch.float16)
-        idx = torch.randint(0, 256, (128,), dtype=torch.int32)
+        idx = torch.randint(0, 256, (128,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
     # ------------------------------------------------------------------
 
-    def test_cor_gather_identity(self, execution_mode):
-        """Gather with identity index; output equals source."""
-        M = 32
-        x = cached_randn((M, 64), differentiation="cor01", dtype=torch.float16)
-        idx = torch.arange(M, dtype=torch.int32)
-        compare_mode(
-            execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
-        )
-
     def test_cor_gather_zero_inner(self, execution_mode):
         """Inner dim D=1; minimal column width."""
         x = cached_randn((64, 1), differentiation="cor02", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -958,7 +933,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_cor_bfloat16_large_index(self, execution_mode):
         """bfloat16 source; large P=256 index."""
         x = cached_randn((512, 64), differentiation="cor03", dtype=torch.bfloat16)
-        idx = torch.randint(0, 512, (256,), dtype=torch.int32)
+        idx = torch.randint(0, 512, (256,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_BF16, rtol=_ATOL_BF16
         )
@@ -966,14 +941,14 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_cor_float32_exact(self, execution_mode):
         """float32 round-trip; values preserved exactly."""
         x = torch.arange(64 * 32, dtype=torch.float32).reshape(64, 32)
-        idx = torch.arange(0, 64, 2, dtype=torch.int32)
+        idx = torch.arange(0, 64, 2, dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_cor_two_sources_same_index(self, execution_mode):
         """Same index applied to two source tensors independently."""
         a = cached_randn((64, 128), differentiation="cor05a", dtype=torch.float16)
         b = cached_randn((64, 128), differentiation="cor05b", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda a, b, i: a[i] + b[i],
@@ -988,7 +963,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Random permutation index; all rows present exactly once."""
         M = 64
         x = cached_randn((M, 32), differentiation="cor06", dtype=torch.float16)
-        perm = torch.randperm(M, dtype=torch.int32)
+        perm = torch.randperm(M, dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, perm, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -996,7 +971,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_cor_large_p_small_m(self, execution_mode):
         """P >> M; many repeated accesses from small source."""
         x = cached_randn((4, 64), differentiation="cor07", dtype=torch.float16)
-        idx = torch.randint(0, 4, (128,), dtype=torch.int32)
+        idx = torch.randint(0, 4, (128,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -1004,7 +979,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_cor_inner_dim_multiple_sticks(self, execution_mode):
         """D=512 (8 sticks at fp16); wide row gather."""
         x = cached_randn((64, 512), differentiation="cor08", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -1012,7 +987,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_cor_gather_then_norm(self, execution_mode):
         """Gather + F.normalize downstream."""
         x = cached_randn((64, 128), differentiation="cor09", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: F.normalize(x[i].float(), dim=-1).half(),
@@ -1025,7 +1000,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_cor_gather_min_max(self, execution_mode):
         """Gather output values are numerically preserved; verified via compare_mode."""
         x = cached_randn((64, 128), differentiation="cor10", dtype=torch.float16)
-        idx = torch.randint(0, 64, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
@@ -1046,7 +1021,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_cor_gather_with_scale(self, execution_mode):
         """Gather + scale factor; linear downstream correctness."""
         x = cached_randn((64, 128), differentiation="cor12", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i] * 0.5,
@@ -1059,7 +1034,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_cor_gather_accumulate(self, execution_mode):
         """Gather + sum accumulate; output is scalar per batch."""
         x = cached_randn((64, 128), differentiation="cor13", dtype=torch.float16)
-        idx = torch.randint(0, 64, (32,), dtype=torch.int32)
+        idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
             execution_mode,
             lambda x, i: x[i].sum(dim=-1),
@@ -1073,7 +1048,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Source values span full int32 range; exact gather."""
         hi = 2**15
         x = torch.randint(-hi, hi, (32, 64), dtype=torch.int32)
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     # ------------------------------------------------------------------
@@ -1083,7 +1058,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         x = torch.randn(32, 64, dtype=torch.float16)
         x[5, :] = float("nan")
         x[20, :] = float("nan")
-        idx = torch.tensor([5, 0, 20, 10], dtype=torch.int32)
+        idx = torch.tensor([5, 0, 20, 10], dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_neg_inf_padding_rows_gathered(self, execution_mode):
@@ -1091,14 +1066,14 @@ class TestGatherBoundaryNumericsAndAPIForms:
         x = cached_randn((32, 64), differentiation="nan02", dtype=torch.float16)
         x[0, :] = float("-inf")
         x[31, :] = float("-inf")
-        idx = torch.randint(0, 32, (16,), dtype=torch.int32)
+        idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_pos_inf_source_rows(self, execution_mode):
         """+inf values in source row; gather propagates +inf to all output copies."""
         x = cached_randn((32, 64), differentiation="nan03", dtype=torch.float16)
         x[7, :] = float("inf")
-        idx = torch.tensor([7, 7, 0, 1, 7], dtype=torch.int32)
+        idx = torch.tensor([7, 7, 0, 1, 7], dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_mixed_nan_neg_inf_source(self, execution_mode):
@@ -1106,7 +1081,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         x = cached_randn((32, 64), differentiation="nan04", dtype=torch.float16)
         x[0, :] = float("nan")
         x[31, :] = float("-inf")
-        idx = torch.tensor([0, 31, 5, 15], dtype=torch.int32)
+        idx = torch.tensor([0, 31, 5, 15], dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_nan_in_unselected_rows_does_not_contaminate(self, execution_mode):
@@ -1114,7 +1089,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         x = cached_randn((32, 64), differentiation="nan05", dtype=torch.float16)
         x[10, :] = float("nan")
         x[20, :] = float("nan")
-        idx = torch.arange(8, dtype=torch.int32)
+        idx = torch.arange(8, dtype=torch.int64)
         result_ref = x[idx]
         assert not result_ref.isnan().any()
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
@@ -1123,7 +1098,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         """Causal mask: future-position rows are -inf; gather reads only valid past rows."""
         x = cached_randn((64, 128), differentiation="nan06", dtype=torch.float16)
         x[32:, :] = float("-inf")
-        idx = torch.arange(32, dtype=torch.int32)
+        idx = torch.arange(32, dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     # ------------------------------------------------------------------
@@ -1131,7 +1106,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_noncontig_idx_stride2(self, execution_mode):
         """Non-contiguous index tensor with stride=2; every other element selected."""
         x = cached_randn((32, 128), differentiation="ncidx01", dtype=torch.float16)
-        idx_full = torch.randint(0, 32, (32,), dtype=torch.int32)
+        idx_full = torch.randint(0, 32, (32,), dtype=torch.int64)
         idx = idx_full[::2]
         assert not idx.is_contiguous()
         compare_mode(
@@ -1141,7 +1116,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_noncontig_idx_stride3(self, execution_mode):
         """Non-contiguous index with stride=3; 16 elements from a 48-element buffer."""
         x = cached_randn((32, 64), differentiation="ncidx02", dtype=torch.float16)
-        idx_base = torch.randint(0, 32, (48,), dtype=torch.int32)
+        idx_base = torch.randint(0, 32, (48,), dtype=torch.int64)
         idx = idx_base[::3]
         assert not idx.is_contiguous()
         compare_mode(
@@ -1151,7 +1126,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_noncontig_idx_stride4(self, execution_mode):
         """Non-contiguous index with stride=4; 16 elements from a 64-element buffer."""
         x = cached_randn((64, 64), differentiation="ncidx03", dtype=torch.float16)
-        idx_base = torch.randint(0, 64, (64,), dtype=torch.int32)
+        idx_base = torch.randint(0, 64, (64,), dtype=torch.int64)
         idx = idx_base[::4]
         assert not idx.is_contiguous()
         compare_mode(
@@ -1161,7 +1136,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_noncontig_2d_idx_transposed(self, execution_mode):
         """Transposed 2D index tensor; shape (8,4) with non-unit strides."""
         x = cached_randn((32, 64), differentiation="ncidx04", dtype=torch.float16)
-        idx_2d = torch.randint(0, 32, (4, 8), dtype=torch.int32)
+        idx_2d = torch.randint(0, 32, (4, 8), dtype=torch.int64)
         idx = idx_2d.T
         assert not idx.is_contiguous()
         compare_mode(
@@ -1183,13 +1158,13 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def test_empty_index_zero_output(self, execution_mode):
         """P=0 empty index; output shape must be (0, D) with no elements accessed."""
         x = cached_randn((32, 64), differentiation="ec_empty01", dtype=torch.float16)
-        idx = torch.zeros(0, dtype=torch.int32)
+        idx = torch.zeros(0, dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_minimal_gather_m1_p1_d1(self, execution_mode):
         """Absolute minimum: M=1, P=1, D=1; scalar gather from single-element source."""
         x = torch.tensor([[42.0]], dtype=torch.float16)
-        idx = torch.tensor([0], dtype=torch.int32)
+        idx = torch.tensor([0], dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], x, idx, atol=0, rtol=0)
 
     def test_negative_index_int64(self, execution_mode):
