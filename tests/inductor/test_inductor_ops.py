@@ -5807,8 +5807,11 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         # Large matmul on s390x/ppc64: live fp16 CPU GEMM can be extremely slow
         # (no optimized fp16 BLAS). Use fp32→fp16 CPU references for allow-listed
         # shapes only; Spyre still executes on the original fp16 inputs.
+        # Skip when compare_with_cpu is overridden (e.g. LX planning wraps fn with
+        # a second op); a bare-matmul CPU ref would not match wrap(fn) on Spyre.
         if (
-            _arch_needs_large_matmul_fp32_cpu_ref()
+            type(self).compare_with_cpu is TestOps.compare_with_cpu
+            and _arch_needs_large_matmul_fp32_cpu_ref()
             and _is_large_matmul_fp32_cpu_ref_shape(a, b)
         ):
             kwargs.update(_build_large_matmul_fp32_cpu_refs(op, a, b))
