@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
 import math
 import os
 import platform
+import sys
 import pytest
 import unittest
 import torch
@@ -35,7 +37,7 @@ from utils_inductor import (
 import utils_inductor
 from unittest import mock
 from torch_spyre._inductor import config as inductor_config
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch_spyre._inductor.dtype_ops import DtypeOpTable
 from torch_spyre._inductor.constants import IDENTITY_OP
 
@@ -355,6 +357,31 @@ def _dtype_name(dt):
     return str(dt).split(".")[-1]
 
 
+@functools.lru_cache(maxsize=None)
+def _cached_randint(shape, dtype):
+    gen = utils_inductor._make_generator(shape, dtype)
+    return torch.randint(0, 512, shape, dtype=dtype, generator=gen)
+
+
+@functools.lru_cache(maxsize=None)
+def _cached_fp32_for_int32_cast(shape):
+    """Generate fp32 tensor from truncated int32 values for testing fp32->int32.
+
+    Avoids pathological cases where random fp32 all truncate to 0. Instead,
+    we generate int32 values (0-512), cast to fp32, ensuring the truncation
+    test covers meaningful value ranges.
+    """
+    gen = utils_inductor._make_generator(shape, torch.int32)
+    src_int = torch.randint(0, 512, shape, dtype=torch.int32, generator=gen)
+    return src_int.to(torch.float32)
+
+
+def _cached_to_dtype_input(shape, src):
+    if src.is_floating_point:
+        return cached_randn(shape, dtype=src)
+    return _cached_randint(shape, src)
+
+
 TO_DTYPE_OP_MAP_PARAMS_SETS = {
     f"{_dtype_name(src)}_to_{_dtype_name(dst)}": (src, dst)
     for src, dst in ALL_DTYPE_PAIRS
@@ -362,7 +389,9 @@ TO_DTYPE_OP_MAP_PARAMS_SETS = {
 
 TO_DTYPE_OP_PARAMS_SETS = {
     f"{_dtype_name(src)}_to_{_dtype_name(dst)}_{shapes2key((shape,))}": (
-        cached_randn(shape, dtype=src),
+        _cached_fp32_for_int32_cast(shape)
+        if (src, dst) == (torch.float32, torch.int32)
+        else _cached_to_dtype_input(shape, src),
         dst,
     )
     for src, dst in DtypeOpTable.get_dtype_pairs()
@@ -379,8 +408,18 @@ TO_DTYPE_OP_EXPECT_FAIL = [
     for shape in TO_DTYPE_OP_SHAPES
     if (
         shape in _DTYPE_OP_ALL_OPS_FAIL_SHAPES
-        or DtypeOpTable.get_operator(src, dst) != IDENTITY_OP
-        or (src == torch.float32 and shape[-1] < 32)
+        or (
+            DtypeOpTable.get_operator(src, dst) != IDENTITY_OP
+            and (src, dst)
+            not in [(torch.float32, torch.int32), (torch.int32, torch.float32)]
+        )
+        # Sub-stick guard doesn't apply to fp32<->int32 — both are 32-bit,
+        # so there's no width change to trip the fp16-stick boundary.
+        or (
+            src == torch.float32
+            and shape[-1] < 32
+            and (src, dst) != (torch.float32, torch.int32)
+        )
     )
 ]
 
@@ -7117,6 +7156,155 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         self.compare_with_cpu(fn, q, k, v, attn_mask, is_causal, enable_gqa)
 
     @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
+    def test_sdpa_bf16_gqa_noncontiguous_query_pool_planning(self):
+        """Regression test for issue #3775: a bf16 GQA SDPA result with a
+        non-contiguous query (the `view(...).transpose(1, 2)` layout normal
+        transformer attention blocks produce) and an in-bundle consumer (the
+        trailing `+ 0`) previously returned finite but catastrophically wrong
+        values under HBM pool planning, because the SDPA output buffer's
+        cross-bundle allocation-dict aliasing was not detected as pool-
+        ineligible. Adapted from the standalone reproducer posted on PR #3707
+        by arielge, which traced this to 0/5 matching generation tokens on
+        Qwen2.5-1.5B in bf16."""
+        generator = torch.Generator().manual_seed(1337)
+        q_source = (
+            torch.randn((1, 64, 1536), dtype=torch.bfloat16, generator=generator) * 0.1
+        )
+        k_source = (
+            torch.randn((1, 64, 256), dtype=torch.bfloat16, generator=generator) * 0.1
+        )
+        v_source = (
+            torch.randn((1, 64, 256), dtype=torch.bfloat16, generator=generator) * 0.1
+        )
+        q = q_source.view(1, 64, 12, 128).transpose(1, 2)
+        k = k_source.view(1, 64, 2, 128).transpose(1, 2).contiguous()
+        v = v_source.view(1, 64, 2, 128).transpose(1, 2).contiguous()
+        mask = torch.zeros((1, 1, 64, 64), dtype=torch.bfloat16)
+        upper = torch.triu(torch.ones(64, 64, dtype=torch.bool), 1)
+        mask[:, :, upper] = torch.finfo(torch.bfloat16).min
+
+        def fn(q, k, v, mask):
+            attention = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=mask,
+                dropout_p=0.0,
+                scale=1 / 128**0.5,
+                enable_gqa=True,
+            )
+            return attention + 0
+
+        expected = fn(q, k, v, mask)
+        actual = torch.compile(fn, dynamic=False)(
+            q.to("spyre"), k.to("spyre"), v.to("spyre"), mask.to("spyre")
+        ).cpu()
+
+        expected = expected.float().flatten()
+        actual = actual.float().flatten()
+        cosine = F.cosine_similarity(actual, expected, dim=0).item()
+        assert torch.isfinite(actual).all() and cosine >= 0.99, (
+            f"cosine={cosine:.8f} max_abs={(actual - expected).abs().max().item():.8f}"
+        )
+
+    @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
+    def test_sdpa_bf16_gqa_decode_query_is_canonicalized(self):
+        """Decode SDPA must canonicalize a physically heads-inner query."""
+        num_heads, num_kv_heads, head_dim = 16, 1, 512
+        generator = torch.Generator().manual_seed(1337)
+        query = (
+            torch.randn(
+                (1, num_heads, 1, head_dim),
+                dtype=torch.bfloat16,
+                generator=generator,
+            )
+            * 0.1
+        )
+        key = (
+            torch.randn(
+                (1, num_kv_heads, 64, head_dim),
+                dtype=torch.bfloat16,
+                generator=generator,
+            )
+            * 0.1
+        )
+        value = (
+            torch.randn(
+                (1, num_kv_heads, 64, head_dim),
+                dtype=torch.bfloat16,
+                generator=generator,
+            )
+            * 0.1
+        )
+        mask = torch.zeros((1, 1, 1, 64), dtype=torch.bfloat16)
+
+        def fn(query, key, value, mask):
+            return F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=mask,
+                dropout_p=0.0,
+                scale=1 / head_dim**0.5,
+                enable_gqa=True,
+            )
+
+        # This is the exact device tiling emitted for Gemma's in-graph RoPE
+        # query at decode: logical [B, H, 1, D], but heads nested after the
+        # stick axis.  Construct it explicitly so the regression does not
+        # depend on hash-sensitive LX allocation decisions.
+        layout_type = sys.modules["torch_spyre._C"].SpyreTensorLayout
+        heads_inner = layout_type(
+            list(query.size()),
+            list(query.stride()),
+            query.dtype,
+            [1, 0, 2, 3],
+        )
+        assert list(heads_inner.device_size) == [1, 1, 8, num_heads, 64]
+        query_spyre = query.to("spyre", device_layout=heads_inner)
+
+        bmm_x_sizes = []
+        spyre_kernel = sys.modules["torch_spyre._inductor.spyre_kernel"]
+        original_create_op_spec = spyre_kernel.SpyreKernel.create_op_spec
+
+        def capture_bmm_x(self, op, is_reduction, args, op_info, *a, **kw):
+            if op == "batchmatmul" and args:
+                bmm_x_sizes.append(list(args[0].device_size))
+            return original_create_op_spec(
+                self, op, is_reduction, args, op_info, *a, **kw
+            )
+
+        # OpSpec construction is skipped on a generated-code cache hit, so a
+        # fresh cache is part of the test fixture rather than relying on the
+        # state left by earlier tests in the same worker.
+        with (
+            fresh_inductor_cache(),
+            mock.patch.object(
+                spyre_kernel.SpyreKernel, "create_op_spec", capture_bmm_x
+            ),
+        ):
+            actual = torch.compile(fn, dynamic=False)(
+                query_spyre,
+                key.to("spyre"),
+                value.to("spyre"),
+                mask.to("spyre"),
+            ).cpu()
+
+        expected = fn(query, key, value, mask)
+        cosine = F.cosine_similarity(
+            actual.float().flatten(), expected.float().flatten(), dim=0
+        ).item()
+        assert torch.isfinite(actual).all() and cosine >= 0.99, (
+            f"cosine={cosine:.8f} "
+            f"max_abs={(actual.float() - expected.float()).abs().max().item():.8f}"
+        )
+
+        query_elems = num_heads * head_dim
+        query_sizes = [ds for ds in bmm_x_sizes if math.prod(ds) == query_elems]
+        assert query_sizes, f"no score-matmul query found in {bmm_x_sizes}"
+        assert all(ds[0] == num_heads for ds in query_sizes), query_sizes
+
+    @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
     def test_implicit_loading(self):
         def test(end, device=None):
             return torch.arange(end, device=device, dtype=torch.float16)
@@ -7205,11 +7393,11 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         """Test that offset-stick slice mutation raises Unsupported when no alt dim is divisible by stick_size."""
 
         def fn(x, y):
-            x[:, 32:96].copy_(y)
+            x[32:96].copy_(y)
             return x.clone()
 
-        x = torch.randn(63, 128, dtype=torch.float16, device="spyre")
-        y = torch.randn(63, 64, dtype=torch.float16, device="spyre")
+        x = torch.randn(128, dtype=torch.float16, device="spyre")
+        y = torch.randn(64, dtype=torch.float16, device="spyre")
 
         compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=False)
         with pytest.raises(Exception) as exc_info:
