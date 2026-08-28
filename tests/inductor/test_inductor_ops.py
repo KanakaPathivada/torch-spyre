@@ -689,11 +689,10 @@ def _pattern_resolve(variant, args):
     raise ValueError(f"unknown transpose suite variant {variant}")
 
 
-# Param-set keys under TestOps.PARAMS[("test_large_matmul", "test_mm_relaxed")]
-# that use fp32→fp16 CPU refs on s390x/ppc64 (proxy gold for speed, not fp16-CPU
-# parity vs x86). Shapes are derived from those PARAMS entries after TestOps is
-# defined so this allow-list cannot silently drift from PARAMS.
-_LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS = frozenset(
+# Scope gate for fp32→fp16 proxy CPU refs (s390x/ppc64): param keys under
+# TestOps.PARAMS[("test_large_matmul", "test_mm_relaxed")]. Shapes are derived
+# from PARAMS after TestOps is defined so the allow-list cannot drift.
+_TEST_LARGE_MATMUL_FP32_PROXY_PARAM_KEYS = frozenset(
     {
         "2d_M2048_K2048_N65536",
         "4d_B2_H2_M2048_K2048_N65472",
@@ -701,61 +700,75 @@ _LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS = frozenset(
 )
 
 # Populated from TestOps.PARAMS after the class body runs (see bottom of module).
-_LARGE_MATMUL_FP32_CPU_REF_SHAPES = set()
+_TEST_LARGE_MATMUL_FP32_PROXY_SHAPES = set()
 
 
-def _derive_large_matmul_fp32_cpu_ref_shapes(param_sets) -> set:
-    missing = _LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS - param_sets.keys()
+def _derive_test_large_matmul_fp32_proxy_shapes(param_sets) -> set:
+    missing = _TEST_LARGE_MATMUL_FP32_PROXY_PARAM_KEYS - param_sets.keys()
     if missing:
         raise RuntimeError(
-            "large-matmul fp32 CPU ref param keys missing from "
+            "test_large_matmul fp32-proxy param keys missing from "
             'TestOps.PARAMS[("test_large_matmul", "test_mm_relaxed")]: '
             f"{sorted(missing)}"
         )
     return {
         (tuple(param_sets[key][0].shape), tuple(param_sets[key][1].shape))
-        for key in _LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS
+        for key in _TEST_LARGE_MATMUL_FP32_PROXY_PARAM_KEYS
     }
 
 
 # Cached once: platform.machine() is stable for the process.
-_ARCH_NEEDS_LARGE_MATMUL_FP32_CPU_REF = (
+_ARCH_NEEDS_FP32_PROXY_CPU_REF = (
     platform.machine().lower().startswith(("s390x", "ppc64"))
 )
 
 
-def _arch_needs_large_matmul_fp32_cpu_ref() -> bool:
-    return _ARCH_NEEDS_LARGE_MATMUL_FP32_CPU_REF
+def _arch_needs_fp32_proxy_cpu_ref() -> bool:
+    return _ARCH_NEEDS_FP32_PROXY_CPU_REF
 
 
-def _is_large_matmul_fp32_cpu_ref_shape(a: torch.Tensor, b: torch.Tensor) -> bool:
+def _is_test_large_matmul_fp32_proxy_shape(a: torch.Tensor, b: torch.Tensor) -> bool:
     # Gated by tensor shapes only. Today these shapes are unique to test_large_matmul;
     # if another test_mm_relaxed case reused them on s390x/ppc64, it would also take
-    # the fp32→fp16 CPU ref path. Intended coverage is _LARGE_MATMUL_FP32_CPU_REF_PARAM_KEYS.
-    return (tuple(a.shape), tuple(b.shape)) in _LARGE_MATMUL_FP32_CPU_REF_SHAPES
+    # the fp32→fp16 CPU ref path. Intended coverage is _TEST_LARGE_MATMUL_FP32_PROXY_PARAM_KEYS.
+    return (tuple(a.shape), tuple(b.shape)) in _TEST_LARGE_MATMUL_FP32_PROXY_SHAPES
 
 
-def _build_large_matmul_fp32_cpu_refs(op, a: torch.Tensor, b: torch.Tensor) -> dict:
-    """Build compare_with_cpu kwargs: fp32 CPU matmul, cast to input dtype.
+def _build_fp32_proxy_cpu_refs(
+    op,
+    a: torch.Tensor,
+    b: torch.Tensor,
+    wrap=None,
+) -> dict:
+    """Build compare_with_cpu kwargs using fp32 execution + cast to input dtype.
 
-    Used for large test_large_matmul shapes on s390x/ppc64 where live fp16 CPU
-    GEMM is extremely slow. Spyre still runs on the original fp16 tensors.
+    Run on fp32 CPU inputs and cast the result to the input dtype (typically fp16).
+    Skips live fp16 CPU work that is extremely slow on s390x/ppc64. Spyre still
+    runs on the original tensors.
 
-    This is a *proxy* numerical gold for CI enablement / wall-time, not fp16-CPU
-    parity: Spyre fp16 is compared to ``op(a.float(), b.float()).to(fp16)``, while
-    x86 and other arches still use live fp16 CPU GEMM as the reference. With the
-    relaxed atol/rtol used by ``test_mm_relaxed`` for multi-stick K, that is
-    intentional and arch-dependent.
+    When ``wrap`` is None (TestOps), ``cpu_eager_result`` is ``op(a32, b32)``.
+    When ``wrap`` is set (LX planning), ``cpu_eager_result`` is
+    ``wrap(op_fp32_proxy)(a, b)`` to match ``compare_with_cpu(wrap(op), ...)``.
+
+    Gate on arch + ``_is_test_large_matmul_fp32_proxy_shape`` before calling.
+
+    Proxy gold for CI wall-time under ``test_mm_relaxed`` tolerances, not fp16-CPU
+    parity vs x86.
     """
-    a32 = a.float()
-    b32 = b.float()
-    out_dtype = a.dtype
+
+    def op_fp32_proxy(a, b):
+        return op(a.float(), b.float()).to(dtype=a.dtype)
+
     kwargs = {}
     with torch.no_grad():
-        kwargs["cpu_eager_result"] = op(a32, b32).to(dtype=out_dtype)
-        if bool(os.getenv("TEST_COMPARE_CPU_COMPILE")):
-            out32 = _compile_and_run(op, (a32, b32), "cpu", compile=True)
-            kwargs["cpu_compile_result"] = out32.to(dtype=out_dtype)
+        if wrap is None:
+            a32, b32 = a.float(), b.float()
+            kwargs["cpu_eager_result"] = op(a32, b32).to(dtype=a.dtype)
+            if bool(os.getenv("TEST_COMPARE_CPU_COMPILE")):
+                out32 = _compile_and_run(op, (a32, b32), "cpu", compile=True)
+                kwargs["cpu_compile_result"] = out32.to(dtype=a.dtype)
+        else:
+            kwargs["cpu_eager_result"] = wrap(op_fp32_proxy)(a, b)
     return kwargs
 
 
@@ -5850,10 +5863,10 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         # a second op); a bare-matmul CPU ref would not match wrap(fn) on Spyre.
         if (
             type(self).compare_with_cpu is TestOps.compare_with_cpu
-            and _arch_needs_large_matmul_fp32_cpu_ref()
-            and _is_large_matmul_fp32_cpu_ref_shape(a, b)
+            and _arch_needs_fp32_proxy_cpu_ref()
+            and _is_test_large_matmul_fp32_proxy_shape(a, b)
         ):
-            kwargs.update(_build_large_matmul_fp32_cpu_refs(op, a, b))
+            kwargs.update(_build_fp32_proxy_cpu_refs(op, a, b))
 
         self.compare_with_cpu(op, a, b, **kwargs)
 
@@ -8144,7 +8157,7 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         self.compare_with_cpu(fn, x, run_eager=False)
 
 
-_LARGE_MATMUL_FP32_CPU_REF_SHAPES = _derive_large_matmul_fp32_cpu_ref_shapes(
+_TEST_LARGE_MATMUL_FP32_PROXY_SHAPES = _derive_test_large_matmul_fp32_proxy_shapes(
     TestOps.PARAMS[("test_large_matmul", "test_mm_relaxed")]["param_sets"]
 )
 

@@ -657,14 +657,10 @@ def compare_with_cpu(
     Args:
         run_compile: Run the compiled path on Spyre.
         run_eager: Run the eager (non-compiled) path on Spyre.
-        cpu_eager_result: Optional precomputed CPU eager reference. When set,
-            skips live ``fn(*args)`` on CPU.
-        cpu_compile_result: Optional precomputed compiled-CPU reference
-            (``compile=True``). When set and ``cpu_compile`` is True, skips live
-            compiled CPU execution. This same compiled-CPU reference is compared
-            against every selected Spyre mode (compiled and/or eager). Useful
-            when eager/compiled CPU ``fn(*args)`` is prohibitively slow for large
-            fp16 matmuls on some platforms (s390x/ppc64).
+        cpu_eager_result: Optional precomputed eager CPU reference; skips live
+            ``fn(*args)`` on CPU when set.
+        cpu_compile_result: Optional precomputed compiled-CPU reference; when set
+            and ``cpu_compile`` is True, skips live compiled-CPU execution.
     """
     # if this flag is explicitly passed in by the test, use it
     if cpu_compile is None:
@@ -690,7 +686,6 @@ def compare_with_cpu(
     if not modes:
         raise ValueError("At least one of run_compile or run_eager must be True")
 
-    # Build compiled-CPU reference once (not once per Spyre mode).
     if cpu_compile and cpu_compile_result is None:
         cpu_compile_result = _compile_and_run(
             fn, get_args(), "cpu", needs_device=needs_device, compile=True
