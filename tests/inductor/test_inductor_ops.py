@@ -695,7 +695,7 @@ def _pattern_resolve(variant, args):
 _TEST_LARGE_MATMUL_FP32_PROXY_PARAM_KEYS = frozenset(
     {
         "2d_M2048_K2048_N65536",
-        "4d_B2_H2_M2048_K2048_N65472",
+        "4d_B2_H2_M2048_K2048_N65536",
     }
 )
 
