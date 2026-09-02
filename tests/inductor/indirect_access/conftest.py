@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared fixtures and helpers for the indirect_access FVT test suite.
+"""Shared fixtures and helpers for the indirect_access test suite.
 
 All helpers are plain functions imported explicitly by test modules.
-The `env_gather` fixture is the standard env setup for indirect access tests.
+`sencores` is a parametrized fixture used only by classes that explicitly test
+multi-core behaviour; request it in env_base to opt in.
 """
 
 import os
@@ -27,13 +28,24 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils_inductor import compare_with_cpu  # noqa: E402
 
+try:
+    from torch_spyre._inductor import config as _spyre_config
 
-@pytest.fixture
-def env_gather():
-    """Set SENCORES=1 for indirect access tests."""
-    os.environ["SENCORES"] = "1"
-    yield
-    os.environ.pop("SENCORES", None)
+    _max_sencores = _spyre_config.sencores
+except ImportError:
+    _max_sencores = int(os.getenv("SENCORES", "32"))
+
+# Single-core and chip-max; MULTICORE_SENCORES subset.
+MULTICORE_SENCORES = (1, _max_sencores)
+
+
+@pytest.fixture(params=MULTICORE_SENCORES)
+def sencores(request):
+    """Parametrized over single-core (1) and chip-max sencores.
+
+    Only kicks in for classes whose env_base requests this fixture.
+    """
+    return request.param
 
 
 def compare_mode(execution_mode, fn, *args, atol=0.1, rtol=0.1):

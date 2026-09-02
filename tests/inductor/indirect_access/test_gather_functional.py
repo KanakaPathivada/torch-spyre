@@ -36,9 +36,7 @@ class TestGatherShapeRankAndIndexPatterns:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop("SENCORES", None)
 
     # ------------------------------------------------------------------
 
@@ -379,9 +377,7 @@ class TestGatherNonLeadingDimEagerCompile:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop("SENCORES", None)
 
     # -- dim=1: fully-independent index (attention head / sequence position) --
 

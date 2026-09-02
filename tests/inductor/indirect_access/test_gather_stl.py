@@ -38,9 +38,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop("SENCORES", None)
         os.environ.pop("LX_PLANNING", None)
 
     # ------------------------------------------------------------------
@@ -353,8 +351,7 @@ class TestGatherSpyreTensorLayoutAnnotation:
         )
 
     def test_stl_4arg_sencores4(self, execution_mode):
-        """GSTLADV-10: 4-arg STL gather at SENCORES=4."""
-        os.environ["SENCORES"] = "4"
+        """GSTLADV-10: 4-arg STL gather; multi-core execution (sencores from fixture)."""
         kv = cached_randn((512, 8, 64), differentiation="stladv10", dtype=torch.float16)
         idx = torch.randint(0, 512, (4 * 32,), dtype=torch.int64)
         compare_mode(

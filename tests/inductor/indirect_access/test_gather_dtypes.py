@@ -35,9 +35,7 @@ class TestGatherValueAndIndexDtypeCoverage:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop("SENCORES", None)
         os.environ.pop("TORCH_SPYRE_DOWNCAST_WARN", None)
 
     # -- value dtype variants ---------------------------------------------

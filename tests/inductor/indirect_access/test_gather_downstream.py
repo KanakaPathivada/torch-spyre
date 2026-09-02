@@ -37,10 +37,13 @@ class TestGatherFusedDownstreamOperations:
         torch.manual_seed(0xAFFE)
 
     @pytest.fixture(autouse=True)
-    def env_base(self):
-        os.environ["SENCORES"] = "1"
-        yield
-        os.environ.pop("SENCORES", None)
+    def env_base(self, sencores, execution_mode):
+        if execution_mode == "eager" and sencores != 1:
+            pytest.skip("sencores only matters in compiled mode")
+        from torch_spyre._inductor import config
+
+        with config.patch({"sencores": sencores}):
+            yield
         os.environ.pop("LX_PLANNING", None)
         os.environ.pop("CO_OPTIMIZING_LX_PLANNING", None)
         os.environ.pop("SPYRE_INDUCTOR_ENABLE_FUSION", None)
@@ -344,26 +347,16 @@ class TestGatherFusedDownstreamOperations:
 
     # ------------------------------------------------------------------
 
-    @pytest.mark.parametrize(
-        "sencores,diff_key",
-        [
-            ("1", "gem01"),
-            ("4", "gem02"),
-            ("32", "gem03"),
-        ],
-    )
-    def test_sencores_2d(self, execution_mode, sencores, diff_key):
-        """2D gather on (32,256) at SENCORES=1/4/32."""
-        os.environ["SENCORES"] = sencores
-        x = cached_randn((32, 256), differentiation=diff_key, dtype=torch.float16)
+    def test_sencores_2d(self, execution_mode):
+        """2D gather on (32,256) across sencores=1/4/32 (parametrized via class fixture)."""
+        x = cached_randn((32, 256), differentiation="gem01", dtype=torch.float16)
         idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(
             execution_mode, lambda x, i: x[i], x, idx, atol=_ATOL_F16, rtol=_ATOL_F16
         )
 
     def test_sencores_4_3d(self, execution_mode):
-        """Multi-core 3D gather (SENCORES=4) on (8,32,128)."""
-        os.environ["SENCORES"] = "4"
+        """3D gather on (8,32,128) across sencores=1/4/32 (parametrized via class fixture)."""
         x = cached_randn((8, 32, 128), differentiation="gem04", dtype=torch.float16)
         idx = torch.randint(0, 8, (4,), dtype=torch.int64)
         compare_mode(
@@ -371,8 +364,7 @@ class TestGatherFusedDownstreamOperations:
         )
 
     def test_sencores_32_embedding(self, execution_mode):
-        """Full-chip embedding table lookup (V=32000, SENCORES=32)."""
-        os.environ["SENCORES"] = "32"
+        """Embedding-table-shaped gather on (512,128) across sencores values."""
         w = cached_randn((512, 128), differentiation="gem05", dtype=torch.float16)
         idx = torch.randint(0, 512, (32,), dtype=torch.int64)
         compare_mode(
@@ -380,8 +372,7 @@ class TestGatherFusedDownstreamOperations:
         )
 
     def test_sencores_32_paged_kv(self, execution_mode):
-        """Full-chip 3D KV pool gather (SENCORES=32) on (1024,8,64)."""
-        os.environ["SENCORES"] = "32"
+        """3D KV pool gather on (256,8,64) across sencores values."""
         kv = cached_randn((256, 8, 64), differentiation="gem06", dtype=torch.float16)
         idx = torch.randint(0, 256, (32,), dtype=torch.int64)
         compare_mode(
