@@ -39,9 +39,7 @@ class TestGatherPagedAttentionAndSDPA:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop("SENCORES", None)
         os.environ.pop("LX_PLANNING", None)
 
     # ------------------------------------------------------------------
@@ -284,8 +282,7 @@ class TestGatherPagedAttentionAndSDPA:
         )
 
     def test_sdpa_sencores4_paged_decode(self, execution_mode):
-        """SENCORES=4 with paged KV gather → SDPA; 4-core execution."""
-        os.environ["SENCORES"] = "4"
+        """Paged KV gather → SDPA; multi-core execution (sencores from fixture)."""
         pool, H, D = 512, 8, 64
         k_cache = cached_randn(
             (pool, H, D), differentiation="attn09k", dtype=torch.float16
@@ -313,8 +310,7 @@ class TestGatherPagedAttentionAndSDPA:
         )
 
     def test_sdpa_sencores32_paged_prefill(self, execution_mode):
-        """SENCORES=32 with large prefill gather (128 slots) → SDPA."""
-        os.environ["SENCORES"] = "32"
+        """Large prefill gather (128 slots) → SDPA; multi-core execution (sencores from fixture)."""
         pool, H, D, Lq = 1024, 8, 64, 128
         k_cache = cached_randn(
             (pool, H, D), differentiation="attn10k", dtype=torch.float16

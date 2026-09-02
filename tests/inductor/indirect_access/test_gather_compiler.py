@@ -36,10 +36,11 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
         torch.manual_seed(0xAFFE)
 
     @pytest.fixture(autouse=True)
-    def env_base(self):
-        os.environ["SENCORES"] = "1"
-        yield
-        os.environ.pop("SENCORES", None)
+    def env_base(self, sencores):
+        from torch_spyre._inductor import config
+
+        with config.patch({"sencores": sencores}):
+            yield
         os.environ.pop("LX_PLANNING", None)
         os.environ.pop("DXP_LX_FRAC_AVAIL", None)
 
@@ -146,8 +147,7 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
         )
 
     def test_sencores32_memory(self):
-        """32-core; each core processes row-shard; all results correct."""
-        os.environ["SENCORES"] = "32"
+        """Multi-core gather on (256,64); results correct at all sencores values."""
         x = cached_randn((256, 64), differentiation="mem08", dtype=torch.float16)
         idx = torch.randint(0, 256, (128,), dtype=torch.int64)
         compare_mode(
@@ -278,16 +278,14 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize(
-        "sencores,shape,P,diff_key",
+        "shape,P,diff_key",
         [
-            ("1", (64, 128), 32, "cfg03"),
-            ("4", (64, 128), 32, "cfg04"),
-            ("32", (256, 128), 64, "cfg05"),
+            ((64, 128), 32, "cfg03"),
+            ((256, 128), 64, "cfg05"),
         ],
     )
-    def test_sencores_correctness(self, sencores, shape, P, diff_key):
-        """SENCORES=1/4/32 gather correctness; compiled output matches CPU."""
-        os.environ["SENCORES"] = sencores
+    def test_sencores_correctness(self, shape, P, diff_key):
+        """Gather correctness across sencores=1/4/32 (from class fixture) and two shapes."""
         x = cached_randn(shape, differentiation=diff_key, dtype=torch.float16)
         idx = torch.randint(0, shape[0], (P,), dtype=torch.int64)
         compare_mode(
@@ -313,8 +311,7 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
         torch.testing.assert_close(r1, r2, atol=0, rtol=0)
 
     def test_two_gathers_sencores4(self):
-        """Two gathers + SENCORES=4; both GATHER_OP_SPECs correct."""
-        os.environ["SENCORES"] = "4"
+        """Two gathers; both GATHER_OP_SPECs correct at all sencores values."""
         x = cached_randn((64, 128), differentiation="cfg10a", dtype=torch.float16)
         y = cached_randn((64, 128), differentiation="cfg10b", dtype=torch.float16)
         idx = torch.randint(0, 64, (32,), dtype=torch.int64)
@@ -397,8 +394,7 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
         )
 
     def test_lxd_sencores32_co_opt(self):
-        """32-core + LX_PLANNING + co-opt; full chip utilization correct."""
-        os.environ["SENCORES"] = "32"
+        """LX_PLANNING + co-opt; result correct at all sencores values."""
         os.environ["LX_PLANNING"] = "1"
         x = cached_randn((256, 128), differentiation="lxd07", dtype=torch.float16)
         idx = torch.randint(0, 256, (64,), dtype=torch.int64)
@@ -599,8 +595,7 @@ class TestGatherCompilerPassesMemoryAndDynamicShapes:
     # ------------------------------------------------------------------
 
     def test_dim1_fancy_indexing_sencores_4(self):
-        """x[:, idx, :] dim=1 gather with SENCORES=4; non-leading-dim gather across 4 cores."""
-        os.environ["SENCORES"] = "4"
+        """x[:, idx, :] dim=1 gather; non-leading-dim gather across all sencores values."""
         x = cached_randn((8, 32, 64), differentiation="dim01", dtype=torch.float16)
         idx = torch.randint(0, 32, (16,), dtype=torch.int64)
         compare_mode(

@@ -40,9 +40,7 @@ class TestGatherEmbeddingTableLookupAndPooling:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop("SENCORES", None)
 
     # ------------------------------------------------------------------
 

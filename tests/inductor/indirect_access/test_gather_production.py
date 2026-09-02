@@ -37,32 +37,31 @@ class TestGatherProductionInferencePatterns:
         torch.manual_seed(0xAFFE)
 
     @pytest.fixture(autouse=True)
-    def env_base(self):
-        os.environ["SENCORES"] = "1"
-        yield
-        os.environ.pop("SENCORES", None)
+    def env_base(self, sencores, execution_mode):
+        if execution_mode == "eager" and sencores != 1:
+            pytest.skip("sencores only matters in compiled mode")
+        from torch_spyre._inductor import config
+
+        with config.patch({"sencores": sencores}):
+            yield
         os.environ.pop("LX_PLANNING", None)
 
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize(
-        "shape,P,sencores,dtype,atol,diff_key",
+        "shape,P,dtype,atol,diff_key",
         [
-            ((4, 64, 32), 8, "1", torch.float16, _ATOL_F16, "moe01"),
-            ((64, 64, 64), 32, "1", torch.float16, _ATOL_F16, "moe02"),
-            ((256, 64, 32), 16, "1", torch.float16, _ATOL_F16, "moe03"),
-            ((8, 64, 32), 32, "1", torch.float16, _ATOL_F16, "moe04"),
-            ((8, 64, 64), 32, "1", torch.bfloat16, _ATOL_BF16, "moe05"),
-            ((8, 64, 64), 32, "4", torch.float16, _ATOL_F16, "moe06"),
-            ((8, 64, 128), 32, "1", torch.float16, _ATOL_F16, "moe07"),
-            ((256, 64, 32), 16, "1", torch.float16, _ATOL_F16, "moe08"),
+            ((4, 64, 32), 8, torch.float16, _ATOL_F16, "moe01"),
+            ((64, 64, 64), 32, torch.float16, _ATOL_F16, "moe02"),
+            ((256, 64, 32), 16, torch.float16, _ATOL_F16, "moe03"),
+            ((8, 64, 32), 32, torch.float16, _ATOL_F16, "moe04"),
+            ((8, 64, 64), 32, torch.bfloat16, _ATOL_BF16, "moe05"),
+            ((8, 64, 64), 32, torch.float16, _ATOL_F16, "moe06"),
+            ((8, 64, 128), 32, torch.float16, _ATOL_F16, "moe07"),
         ],
     )
-    def test_moe_expert_routing(
-        self, execution_mode, shape, P, sencores, dtype, atol, diff_key
-    ):
-        """MoE expert weight gather: expert_w[ids] across shapes, dtypes, and core counts."""
-        os.environ["SENCORES"] = sencores
+    def test_moe_expert_routing(self, execution_mode, shape, P, dtype, atol, diff_key):
+        """MoE expert weight gather: expert_w[ids] across shapes and dtypes; all sencores via fixture."""
         w = cached_randn(shape, differentiation=diff_key, dtype=dtype)
         ids = torch.randint(0, shape[0], (P,), dtype=torch.int64)
         compare_mode(execution_mode, lambda w, i: w[i], w, ids, atol=atol, rtol=atol)
@@ -100,29 +99,25 @@ class TestGatherProductionInferencePatterns:
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize(
-        "kv_shape,P,dtype,atol,sencores,diff_key",
+        "kv_shape,P,dtype,atol,diff_key",
         [
-            ((256, 8, 64), 128, torch.float16, _ATOL_F16, "1", "gpa01"),
-            ((1024, 8, 64), 128, torch.float16, _ATOL_F16, "1", "gpa02"),
-            ((512, 16, 128), 256, torch.float16, _ATOL_F16, "1", "gpa03"),
-            ((512, 8, 64), 12, torch.float16, _ATOL_F16, "1", "gpa04"),
-            ((512, 8, 64), 256, torch.float16, _ATOL_F16, "1", "gpa05"),
-            ((1024, 8, 64), 256, torch.float16, _ATOL_F16, "1", "gpa07"),
-            ((1024, 1, 64), 256, torch.float16, _ATOL_F16, "1", "gpa08"),
-            ((512, 16, 128), 256, torch.float16, _ATOL_F16, "1", "gpa09"),
-            ((512, 8, 256), 128, torch.float16, _ATOL_F16, "1", "gpa10"),
-            ((512, 8, 64), 128, torch.bfloat16, _ATOL_BF16, "1", "gpa11"),
-            ((512, 8, 64), 128, torch.float16, _ATOL_F16, "1", "gpa17"),
-            ((512, 8, 64), 128, torch.float16, _ATOL_F16, "4", "gpa18"),
-            ((512, 8, 64), 256, torch.float16, _ATOL_F16, "32", "gpa19"),
-            ((128, 8, 16, 64), 64, torch.float16, _ATOL_F16, "1", "gpa23"),
+            ((256, 8, 64), 128, torch.float16, _ATOL_F16, "gpa01"),
+            ((1024, 8, 64), 128, torch.float16, _ATOL_F16, "gpa02"),
+            ((512, 16, 128), 256, torch.float16, _ATOL_F16, "gpa03"),
+            ((512, 8, 64), 12, torch.float16, _ATOL_F16, "gpa04"),
+            ((512, 8, 64), 256, torch.float16, _ATOL_F16, "gpa05"),
+            ((1024, 8, 64), 256, torch.float16, _ATOL_F16, "gpa07"),
+            ((1024, 1, 64), 256, torch.float16, _ATOL_F16, "gpa08"),
+            ((512, 8, 256), 128, torch.float16, _ATOL_F16, "gpa10"),
+            ((512, 8, 64), 128, torch.bfloat16, _ATOL_BF16, "gpa11"),
+            ((512, 8, 64), 128, torch.float16, _ATOL_F16, "gpa17"),
+            ((128, 8, 16, 64), 64, torch.float16, _ATOL_F16, "gpa23"),
         ],
     )
     def test_paged_kv_pool_shape(
-        self, execution_mode, kv_shape, P, dtype, atol, sencores, diff_key
+        self, execution_mode, kv_shape, P, dtype, atol, diff_key
     ):
-        """Paged KV pool gather: kv[idx] across pool shapes, head configs, dtypes, cores."""
-        os.environ["SENCORES"] = sencores
+        """Paged KV pool gather: kv[idx] across pool shapes, head configs, dtypes; all sencores via fixture."""
         kv = cached_randn(kv_shape, differentiation=diff_key, dtype=dtype)
         idx = torch.randint(0, kv_shape[0], (P,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], kv, idx, atol=atol, rtol=atol)
@@ -473,19 +468,17 @@ class TestGatherProductionInferencePatterns:
         )
 
     @pytest.mark.parametrize(
-        "P,dtype,atol,sencores,diff_key",
+        "P,dtype,atol,diff_key",
         [
-            (64, torch.float16, _ATOL_F16, "1", "fms01"),
-            (48, torch.float16, _ATOL_F16, "1", "fms03"),
-            (4 * 64, torch.float16, _ATOL_F16, "1", "fms04"),
-            (1, torch.float16, _ATOL_F16, "1", "fms05"),
-            (4 * 16, torch.bfloat16, _ATOL_BF16, "1", "fms06"),
-            (4 * 64, torch.float16, _ATOL_F16, "32", "fms08"),
+            (64, torch.float16, _ATOL_F16, "fms01"),
+            (48, torch.float16, _ATOL_F16, "fms03"),
+            (4 * 64, torch.float16, _ATOL_F16, "fms04"),
+            (1, torch.float16, _ATOL_F16, "fms05"),
+            (4 * 16, torch.bfloat16, _ATOL_BF16, "fms06"),
         ],
     )
-    def test_fms_4d_layout(self, execution_mode, P, dtype, atol, sencores, diff_key):
-        """FMS 4D KV (128,8,16,128) gather across dtypes, output sizes, and core counts."""
-        os.environ["SENCORES"] = sencores
+    def test_fms_4d_layout(self, execution_mode, P, dtype, atol, diff_key):
+        """FMS 4D KV (128,8,16,128) gather across dtypes and output sizes; all sencores via fixture."""
         kv = cached_randn((128, 8, 16, 128), differentiation=diff_key, dtype=dtype)
         idx = torch.randint(0, 128, (P,), dtype=torch.int64)
         compare_mode(execution_mode, lambda x, i: x[i], kv, idx, atol=atol, rtol=atol)

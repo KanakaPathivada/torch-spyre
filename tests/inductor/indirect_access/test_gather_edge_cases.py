@@ -39,9 +39,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop("SENCORES", None)
 
     # ------------------------------------------------------------------
 
@@ -480,8 +478,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         )
 
     def test_index_select_sencores4(self, execution_mode):
-        """index_select across 4 cores (SENCORES=4)."""
-        os.environ["SENCORES"] = "4"
+        """index_select; multi-core result matches CPU (sencores from class fixture)."""
         x = cached_randn((64, 128), differentiation="idxs14", dtype=torch.float16)
         idx = torch.randint(0, 64, (32,), dtype=torch.int64)
         compare_mode(
@@ -891,8 +888,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         )
 
     def test_gather_sencores4_large_correct(self, execution_mode):
-        """Large gather (M=256, P=128) at SENCORES=4; multi-core result matches CPU."""
-        os.environ["SENCORES"] = "4"
+        """Large gather (M=256, P=128); multi-core result matches CPU (sencores from fixture)."""
         x = cached_randn((256, 128), differentiation="bug04", dtype=torch.float16)
         idx = torch.randint(0, 256, (128,), dtype=torch.int64)
         compare_mode(
@@ -912,8 +908,7 @@ class TestGatherBoundaryNumericsAndAPIForms:
         )
 
     def test_gather_large_sencores1_correct(self, execution_mode):
-        """Large gather (M=256, P=128) at SENCORES=1; single-core result matches CPU."""
-        os.environ["SENCORES"] = "1"
+        """Large gather (M=256, P=128); single-core result matches CPU (sencores from fixture)."""
         x = cached_randn((256, 128), differentiation="bug08", dtype=torch.float16)
         idx = torch.randint(0, 256, (128,), dtype=torch.int64)
         compare_mode(
@@ -1222,9 +1217,7 @@ class TestGatherOutParameterEagerCompile:
 
     @pytest.fixture(autouse=True)
     def env_base(self):
-        os.environ["SENCORES"] = "1"
         yield
-        os.environ.pop("SENCORES", None)
 
     def test_gather_out_dim0_basic(self, execution_mode):
         """torch.gather(x, 0, idx, out=buf): out= with leading-dim gather [M=128, N=64, P=32]."""
