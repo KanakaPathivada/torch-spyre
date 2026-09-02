@@ -37,10 +37,6 @@ class TestGatherComposedChainsAndEndToEndPipelines:
     def setup_method(self):
         torch.manual_seed(0xAFFE)
 
-    @pytest.fixture(autouse=True)
-    def env_base(self):
-        yield
-
     # ------------------------------------------------------------------
 
     def test_two_sequential_gathers(self, execution_mode):

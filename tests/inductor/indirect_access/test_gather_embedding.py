@@ -38,10 +38,6 @@ class TestGatherEmbeddingTableLookupAndPooling:
     def setup_method(self):
         torch.manual_seed(0xAFFE)
 
-    @pytest.fixture(autouse=True)
-    def env_base(self):
-        yield
-
     # ------------------------------------------------------------------
 
     def test_embedding_small_vocab(self, execution_mode):
