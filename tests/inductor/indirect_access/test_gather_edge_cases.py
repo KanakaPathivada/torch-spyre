@@ -37,10 +37,6 @@ class TestGatherBoundaryNumericsAndAPIForms:
     def setup_method(self):
         torch.manual_seed(0xAFFE)
 
-    @pytest.fixture(autouse=True)
-    def env_base(self):
-        yield
-
     # ------------------------------------------------------------------
 
     def test_single_row_source(self, execution_mode):
@@ -1214,10 +1210,6 @@ class TestGatherOutParameterEagerCompile:
 
     def setup_method(self):
         torch.manual_seed(0xAFFE)
-
-    @pytest.fixture(autouse=True)
-    def env_base(self):
-        yield
 
     def test_gather_out_dim0_basic(self, execution_mode):
         """torch.gather(x, 0, idx, out=buf): out= with leading-dim gather [M=128, N=64, P=32]."""

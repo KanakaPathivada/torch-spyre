@@ -34,10 +34,6 @@ class TestGatherShapeRankAndIndexPatterns:
     def setup_method(self):
         torch.manual_seed(0xAFFE)
 
-    @pytest.fixture(autouse=True)
-    def env_base(self):
-        yield
-
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize(
@@ -374,10 +370,6 @@ class TestGatherNonLeadingDimEagerCompile:
 
     def setup_method(self):
         torch.manual_seed(0xAFFE)
-
-    @pytest.fixture(autouse=True)
-    def env_base(self):
-        yield
 
     # -- dim=1: fully-independent index (attention head / sequence position) --
 
