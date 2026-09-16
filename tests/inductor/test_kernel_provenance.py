@@ -37,6 +37,7 @@ from torch_spyre._inductor.op_spec import (
     OpSpec,
     SourceLoc,
     TensorArg,
+    TensorWorkDivision,
 )
 from torch_spyre._inductor.kernel_provenance import (
     build_kernel_provenance_descriptor,
@@ -237,6 +238,28 @@ class TestKernelProvenanceDescriptor:
                 dataclasses.replace(arg, element_arrangement=ElementArrangement.EXX2)
             ],
         )
+        owned_arg = dataclasses.replace(
+            arg,
+            work_division=TensorWorkDivision({c0: 2}, {c0: Symbol("core_id")}),
+        )
+        changed_owner = dataclasses.replace(first, args=[owned_arg])
+        changed_owner_cores = dataclasses.replace(
+            first,
+            args=[
+                dataclasses.replace(
+                    arg,
+                    work_division=TensorWorkDivision(
+                        {c0: 2}, {c0: Symbol("core_id")}, num_cores=4
+                    ),
+                )
+            ],
+        )
+        changed_core_mapping = dataclasses.replace(
+            first, core_id_to_work_slice={c0: Integer(1)}
+        )
+        canonical_core_mapping = dataclasses.replace(
+            first, core_id_to_work_slice={c0: Integer(0)}
+        )
 
         first_descriptor = build_kernel_provenance_descriptor([first])
         reordered_descriptor = build_kernel_provenance_descriptor([reordered_metadata])
@@ -244,14 +267,29 @@ class TestKernelProvenanceDescriptor:
         changed_arrangement_descriptor = build_kernel_provenance_descriptor(
             [changed_arrangement]
         )
+        changed_owner_descriptor = build_kernel_provenance_descriptor([changed_owner])
+        changed_owner_cores_descriptor = build_kernel_provenance_descriptor(
+            [changed_owner_cores]
+        )
+        changed_core_mapping_descriptor = build_kernel_provenance_descriptor(
+            [changed_core_mapping]
+        )
+        canonical_core_mapping_descriptor = build_kernel_provenance_descriptor(
+            [canonical_core_mapping]
+        )
 
         assert first_descriptor is not None
         assert reordered_descriptor is not None
         assert changed_descriptor is not None
         assert changed_arrangement_descriptor is not None
+        assert changed_owner_descriptor is not None
         assert reordered_descriptor.key == first_descriptor.key
         assert changed_descriptor.key != first_descriptor.key
         assert changed_arrangement_descriptor.key != first_descriptor.key
+        assert changed_owner_descriptor.key != first_descriptor.key
+        assert changed_owner_cores_descriptor.key != changed_owner_descriptor.key
+        assert changed_core_mapping_descriptor.key != first_descriptor.key
+        assert canonical_core_mapping_descriptor.key == first_descriptor.key
 
     def test_pins_rich_canonical_bundle_key(self):
         c0 = Symbol("c0")
@@ -337,7 +375,9 @@ class TestKernelProvenanceDescriptor:
         assert original is not None
         assert reconstructed == original
 
-    @pytest.mark.parametrize("changed_schema", [OpSpec, TensorArg, LoopSpec])
+    @pytest.mark.parametrize(
+        "changed_schema", [OpSpec, TensorArg, TensorWorkDivision, LoopSpec]
+    )
     def test_rejects_finalized_schema_drift(self, changed_schema):
         real_fields = dataclasses.fields
 
@@ -367,6 +407,7 @@ class TestKernelProvenanceDescriptor:
         [
             (OpSpec, "iteration_space"),
             (TensorArg, "device_coordinates"),
+            (TensorWorkDivision, "work_slices"),
             (LoopSpec, "body"),
         ],
     )
@@ -629,13 +670,14 @@ class TestKernelProvenancePropagation:
                 "torch_spyre.execution.kernel_runner.prepare_kernel",
                 return_value="jobplan",
             ) as prepare_kernel,
+            patch("torch_spyre.execution.kernel_runner.torch.spyre._impl._lazy_init"),
         ):
             runner = SpyreSDSCKernelRunner(
                 "sdsc_fused_mm_0",
                 "/tmp/kernel",
                 kernel_provenance=descriptor,
             )
-
+            assert runner.jobplan == "jobplan"
         assert runner.kernel_provenance is descriptor
         assert runner.profiler_event_name == _event_name(descriptor)
         assert runner.jobplan == "jobplan"
@@ -656,9 +698,10 @@ class TestKernelProvenancePropagation:
                 "torch_spyre.execution.kernel_runner.prepare_kernel",
                 return_value="jobplan",
             ) as prepare_kernel,
+            patch("torch_spyre.execution.kernel_runner.torch.spyre._impl._lazy_init"),
         ):
             runner = SpyreSDSCKernelRunner("sdsc_fused_mm_0", "/tmp/kernel")
-
+            assert runner.jobplan == "jobplan"
         assert runner.kernel_provenance is None
         assert runner.profiler_event_name is None
         prepare_kernel.assert_called_once_with("/tmp/kernel/spyreCodeDir")

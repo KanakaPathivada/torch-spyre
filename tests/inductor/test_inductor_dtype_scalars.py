@@ -561,20 +561,39 @@ class TestNegativeScalarOperations:
 
         assert result.shape == x.shape
 
-    # TODO: ISSUE https://github.com/torch-spyre/torch-spyre/issues/1740
-    # AttributeError: 'UnimplementedOp' object has no attribute 'iteration_space'
-    @pytest.mark.xfail(
-        reason="backend: Negative base with fractional power not implemented"
+    # DLFloat16 draws no distinction between -inf and NaN: both are the word
+    # ``0xFFFF``, which converts to -inf on the way to the host, so ``isnan``
+    # there is False. The marker rides on the parameter rather than the body so
+    # the assertion is reached, and an eventual pass is reported as an xpass.
+    @pytest.mark.parametrize(
+        "dtype",
+        [
+            pytest.param(torch.float32, id="fp32"),
+            pytest.param(
+                torch.float16,
+                id="fp16",
+                marks=pytest.mark.xfail(
+                    reason="float16 device NaN converts to -inf on the way to "
+                    "the host, so the NaN is not observable there"
+                ),
+            ),
+        ],
     )
-    def test_negative_power_nan_result(self, execution_mode):
-        """Negative base with fractional power -> NaN."""
+    def test_negative_power_nan_result(self, execution_mode, dtype):
+        """Negative base with fractional power -> NaN, and a valid base unaffected."""
 
         def neg_power(x):
             return x**-0.5
 
-        x = torch.tensor([-1.0, -2.0, -3.0], device=DEVICE)
+        # 4.0 is a valid base, guarding against a blanket non-finite result.
+        x = torch.tensor([-1.0, -2.0, -3.0, 4.0], dtype=dtype, device=DEVICE)
         result = _run_spyre(execution_mode, neg_power, x)
-        assert torch.isnan(result).all()
+
+        # Checked on the host: ``aten::isnan`` has no Spyre kernel.
+        host = result.cpu()
+        assert torch.isnan(host[:3]).all()
+        assert host[3] == pytest.approx(0.5, abs=1e-3)
+        assert result.shape == x.shape
 
     @pytest.mark.parametrize(
         "dtype,scalar,expected_behavior",
@@ -779,7 +798,10 @@ class TestNegativeScalarOperations:
             pytest.xfail(reason=f"Nested compile unsupported on Spyre path: {err}")
 
     def test_cpu_scalar_tensor_with_spyre_tensor(self, execution_mode):
-        """CPU scalar tensor × Spyre tensor should raise device mismatch error."""
+        """CPU scalar tensor x Spyre tensor should compute successfully: a single
+        non-write 0-dim CPU tensor is exempt from the device-mismatch check
+        (mirrors TensorIterator's ``allow_cpu_scalars_``; see
+        ``test_cross_device_scalar_op_allowed`` in ``tests/test_spyre.py``)."""
         # TODO: ISSUE https://github.com/torch-spyre/torch-spyre/issues/1598
         if execution_mode == "compiled":
             pytest.xfail(
@@ -792,18 +814,7 @@ class TestNegativeScalarOperations:
 
         x = cached_randn((128, 128), dtype=torch.float16)
 
-        with pytest.raises(
-            (RuntimeError, torch._inductor.exc.InductorError)
-        ) as exc_info:
-            _compare_modes(
-                execution_mode, cpu_scalar_spyre_tensor, x, atol=1e-3, rtol=1e-3
-            )
-
-        error_msg = str(exc_info.value)
-        print(error_msg)
-        assert any(
-            kw in error_msg.lower() for kw in ["device", "layout", "cpu", "spyre"]
-        )
+        _compare_modes(execution_mode, cpu_scalar_spyre_tensor, x, atol=1e-3, rtol=1e-3)
 
     def test_cpu_tensor_with_spyre_tensor(self, execution_mode):
         """CPU regular tensor × Spyre tensor should raise device mismatch error."""
