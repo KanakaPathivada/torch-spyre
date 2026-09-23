@@ -63,3 +63,32 @@ def test_ensure_extra_columns_defaults_to_default_table():
         sql.startswith(f"ALTER TABLE {HwFailureDiagnostics.DEFAULT_TABLE} ")
         for sql in client.commands
     )
+
+
+class FakeQueryClient:
+    """Records the SQL/parameters `query` is called with; answers a fixed row count."""
+
+    def __init__(self, count=0):
+        self.count = count
+        self.queries = []
+
+    def query(self, sql, parameters=None):
+        self.queries.append((sql, parameters))
+
+        class R:
+            result_rows = [(self.count,)]
+
+        return R()
+
+
+def test_already_ingested_compares_run_id_as_a_string():
+    # The legacy v1 table's run_id column is String (some prod values are raw GHA run ids,
+    # not valid UUID text, so it can never be MODIFY COLUMN'd to UUID); a v2 table has a real
+    # UUID column instead. A query typed {run_id:UUID} raises NO_COMMON_TYPE against the
+    # String column -- toString(run_id) reads either shape identically.
+    client = FakeQueryClient(count=1)
+    HwFailureDiagnostics.already_ingested(client, "some-run-id", "torch-spyre")
+    sql, params = client.queries[0]
+    assert "toString(run_id) = {run_id:String}" in sql
+    assert "{run_id:UUID}" not in sql
+    assert params == {"run_id": "some-run-id", "component": "torch-spyre"}

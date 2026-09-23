@@ -103,10 +103,10 @@ class HwFailureDiagnostics:
     def already_ingested(
         cls, client, run_id: str, component: str, table: str = ""
     ) -> bool:
-        """True when this (component, run_id) already has rows -- guards against double-insert."""
+        """True when (component, run_id) has rows; toString() matches String or UUID."""
         result = client.query(
             f"SELECT count() FROM {table or cls.DEFAULT_TABLE} "
-            "WHERE component = {component:String} AND run_id = {run_id:UUID}",
+            "WHERE component = {component:String} AND toString(run_id) = {run_id:String}",
             parameters={"run_id": run_id, "component": component},
         )
         return result.result_rows[0][0] > 0
