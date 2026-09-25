@@ -1,4 +1,5 @@
 test_suite_config:
+  labels: [trunk]
   files:
     - path: ${TORCH_ROOT}/test/test_scatter_gather_ops.py
       unlisted_test_mode: skip
@@ -6,65 +7,62 @@ test_suite_config:
         # ---------------------------------------------------------------------------
         # torch.gather
         # Reads src values at positions specified by an index tensor.
-        # All 4 gather variants pass on Spyre today.
-        #
-        # Upstream dtype coverage:
-        #   test_gather             @dtypes(float32, complex64)             — complex64 excluded
-        #   test_gather_bool        @dtypes(bool)                           — runs
-        #   test_gather_large       @dtypes(int8, bfloat16)                 — int8 excluded; bfloat16 runs
-        #   test_gather_expanded_index @dtypes(float32, float64, bfloat16) — float64 excluded; @onlyCPU applies
-        #
-        # Note on @onlyCPU (test_gather_expanded_index):
-        #   @onlyCPU does NOT prevent instantiation for privateuse1 — the variant IS
-        #   collected and executed on Spyre.
+        # test_gather_large dies before gather on stride-2 copy_ (#3454).
+        # The other three die on aten::gather.out (#4328).
         # ---------------------------------------------------------------------------
         - names:
-            - TestScatterGather::test_gather
-            - TestScatterGather::test_gather_bool
-            - TestScatterGather::test_gather_large
-            - TestScatterGather::test_gather_expanded_index
-          mode: mandatory_success
+            - TestScatterGather::test_gather_large  # issue 3454
+          mode: xfail  # xfail: Unexpected stick expression 2*(Mod(d1, 32)) 
+        # ---------------------------------------------------------------------------
+        # aten::gather.out not registered. Covered by
+        # https://github.com/torch-spyre/torch-spyre/issues/4328
+        # Compiled gather hits other bugs (#4321 / #4327 / #1796); 
+        # ---------------------------------------------------------------------------
+        - names:
+            - TestScatterGather::test_gather  # issue 4328
+            - TestScatterGather::test_gather_bool  # issue 4328
+            - TestScatterGather::test_gather_expanded_index  # issue 4328
+          mode: xfail  # xfail: Could not run 'aten::gather.out' 
 
         # ---------------------------------------------------------------------------
         # torch.scatter / torch.scatter_
-        # Writes src values into self at positions specified by an index tensor.
-        # Not yet implemented on Spyre — classified mandatory_success to track when it lands.
-        #
-        # Upstream dtype coverage:
-        #   test_scatter_           @dtypes(float16, float32, complex64)        — complex64 excluded
-        #   test_scatter__scalar    @dtypes(float16, float32, complex64)        — complex64 excluded
-        #   test_scatter__reductions @dtypes(float16, float32, complex64)       — complex64 excluded
-        #   test_scatter_expanded_index @dtypes(float32, float64, bfloat16, float16); @onlyCPU
-        #                               — float64 excluded; @onlyCPU does NOT skip on Spyre
+        # Three distinct missing kernels — keep separate. YAML xfails one group at a time.
+        #   test_scatter_            aten::scatter.src_out     (#1002)
+        #   test_scatter__reductions aten::scatter.reduce_out  (#4413)
+        #   test_scatter__scalar     aten::scatter.value_out   (#4473)
         # ---------------------------------------------------------------------------
         - names:
-            - TestScatterGather::test_scatter_
-            - TestScatterGather::test_scatter__scalar
-            - TestScatterGather::test_scatter__reductions
-            - TestScatterGather::test_scatter_expanded_index
-          mode: mandatory_success
+            - TestScatterGather::test_scatter_  # issue 1002
+          mode: xfail  # xfail: Could not run 'aten::scatter.src_out'
+        - names:
+            - TestScatterGather::test_scatter__reductions  # issue 4413
+          mode: xfail  # xfail: Could not run 'aten::scatter.reduce_out'
+        - names:
+            - TestScatterGather::test_scatter__scalar  # issue 4473
+          mode: xfail  # xfail: Could not run 'aten::scatter.value_out'
 
         # ---------------------------------------------------------------------------
         # torch.scatter_add / torch.scatter_add_
-        # Accumulates src values into self at positions specified by an index tensor.
-        # Not yet implemented on Spyre — classified mandatory_success to track when it lands.
+        # Eager: aten::scatter_add.out not registered (#4396).
         #
         # Upstream dtype coverage:
         #   test_scatter_add_                                    @dtypes(float16, float32, complex64) — complex64 excluded
         #   test_scatter_add_mult_index_base                     @dtypes(float32)
         #   test_scatter_add_broadcasted_index_deterministic     @dtypes(float32)
+        #   test_scatter_expanded_index @dtypes(float32, float64, bfloat16, float16); @onlyCPU
+        #                               — float64 excluded; @onlyCPU does NOT skip on Spyre
         # ---------------------------------------------------------------------------
         - names:
-            - TestScatterGather::test_scatter_add_
-            - TestScatterGather::test_scatter_add_mult_index_base
-            - TestScatterGather::test_scatter_add_broadcasted_index_deterministic
-          mode: mandatory_success
+            - TestScatterGather::test_scatter_add_  # issue 4396
+            - TestScatterGather::test_scatter_add_mult_index_base  # issue 4396
+            - TestScatterGather::test_scatter_add_broadcasted_index_deterministic  # issue 4396
+            - TestScatterGather::test_scatter_expanded_index  # issue 4396
+          mode: xfail  # xfail: Could not run 'aten::scatter_add.out'
 
         # ---------------------------------------------------------------------------
         # torch.scatter_reduce / torch.scatter_reduce_
         # Reduce-mode scatter: sum, prod, mean, amax, amin.
-        # Not yet implemented on Spyre — classified mandatory_success to track when it lands.
-        #
+        # Eager: aten::scatter_reduce.two_out not registered (#4361).
         # Upstream dtype coverage (excluded dtypes noted; active dtypes from supported_dtypes):
         #   test_scatter_reduce_sum   all except bool       — float16, float32, int64, bfloat16
         #   test_scatter_reduce_prod  all (incl bool)       — float16, float32, int64, bfloat16, bool
@@ -74,12 +72,12 @@ test_suite_config:
         #   Excluded from all: complex64, complex128, float64, int8, int16, int32, uint8
         # ---------------------------------------------------------------------------
         - names:
-            - TestScatterGather::test_scatter_reduce_sum
-            - TestScatterGather::test_scatter_reduce_prod
-            - TestScatterGather::test_scatter_reduce_mean
-            - TestScatterGather::test_scatter_reduce_amax
-            - TestScatterGather::test_scatter_reduce_amin
-          mode: mandatory_success
+            - TestScatterGather::test_scatter_reduce_sum  # issue 4361
+            - TestScatterGather::test_scatter_reduce_prod  # issue 4361
+            - TestScatterGather::test_scatter_reduce_mean  # issue 4361
+            - TestScatterGather::test_scatter_reduce_amax  # issue 4361
+            - TestScatterGather::test_scatter_reduce_amin  # issue 4361
+          mode: xfail  # xfail: Could not run 'aten::scatter_reduce.two_out'
 
   global:
     supported_dtypes:

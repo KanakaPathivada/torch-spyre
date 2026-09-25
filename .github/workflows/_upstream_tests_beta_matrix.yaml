@@ -148,6 +148,8 @@ jobs:
         suite:
           - name: Indexing
             config: test_indexing.yaml
+          - name: Scatter gather ops
+            config: test_scatter_gather_ops.yaml
           - name: Linear algebra
             config: test_linalg.yaml
           - name: NeuralNet pooling
