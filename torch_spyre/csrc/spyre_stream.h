@@ -155,19 +155,6 @@ SpyreStream getCurrentStream(
  */
 SpyreStream setCurrentStream(SpyreStream stream);
 
-/**
- * Query whether the stream pool has been initialized for a given device index.
- *
- * Returns true only after initializeStreamPool has been called for @p idx and
- * completed successfully. Safe to call at any time — returns false if the pool
- * has not yet been initialized for @p idx (e.g. before the first kernel
- * dispatch on that device).
- *
- * @param idx Device index to query
- * @return true if the stream pool is initialized for @p idx, false otherwise
- */
-bool isStreamPoolInitializedForDevice(c10::DeviceIndex idx);
-
 void synchronizeDevice(c10::optional<c10::Device> device);
 
 }  // namespace spyre

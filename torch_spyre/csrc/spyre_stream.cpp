@@ -380,12 +380,6 @@ void initializeStreamPool(c10::DeviceIndex device_index) {
                  device_index);
 }
 
-bool isStreamPoolInitializedForDevice(c10::DeviceIndex idx) {
-  auto& pool = getStreamPool();
-  std::shared_lock<std::shared_mutex> lock(pool.mutex);
-  return pool.initialized && pool.initialized_device_index == idx;
-}
-
 SpyreStream getDefaultStream(c10::Device device) {
   if (device.index() == -1) {
     device = c10::Device(c10::DeviceType::PrivateUse1, SpyreGuardImpl::tls_idx);
