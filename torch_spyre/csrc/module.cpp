@@ -216,8 +216,12 @@ PYBIND11_MODULE(_C, m) {
       SpyreHooksInterface() = default;
       explicit SpyreHooksInterface(SpyreHooksArgs) {}
       ~SpyreHooksInterface() override = default;
-      bool hasPrimaryContext(c10::DeviceIndex) const override {
-        return true;
+      bool hasPrimaryContext(c10::DeviceIndex idx) const override {
+        const c10::DeviceIndex local = spyre::SpyreGuardImpl::tls_idx;
+        if (!spyre::isStreamPoolInitializedForDevice(local)) {
+          return idx == local;
+        }
+        return spyre::isStreamPoolInitializedForDevice(idx);
       }
       bool isAvailable() const override {
         return true;
