@@ -51,6 +51,7 @@ from .padding import (
 from .reserved_dims_contract import apply_reserved_dims_contract
 from .temp_passes import (
     bmm_unflatten_pass,
+    clone_in_stick_views_into_cat,
     decompose_addmm,
     mm_to_bmm_pass,
     strided_stick_slice_to_index_select,
@@ -322,6 +323,9 @@ class CustomPostPasses(_SpyreGraphPassPipeline):
                 decompose_addmm,
                 # x[..., k::s] on the stick dim has no device coordinate; gather it.
                 strided_stick_slice_to_index_select,
+                # A view starting inside a stick (x[..., 65:]), written into a cat
+                # on another dim, needs its offset removed first; clone it (#5216).
+                clone_in_stick_views_into_cat,
                 mm_to_bmm_pass.apply,
                 bmm_unflatten_pass.apply,
             ]

@@ -14,6 +14,7 @@
 
 # This file contains inductor passes that are only needed as temp fixes
 
+import operator
 from math import prod
 
 import torch
@@ -25,6 +26,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch_spyre._C import get_elem_in_stick
 from .logging_utils import get_inductor_logger
 from .pass_utils import copy_fx_custom_meta
 
@@ -475,5 +477,154 @@ def strided_stick_slice_to_index_select(graph: torch.fx.Graph) -> None:
             gather = view(permute(picked), list(out_val.shape))
         node.replace_all_uses_with(gather)
         graph.erase_node(node)
+
+    graph.lint()
+
+
+def _in_stick_offset(node: torch.fx.Node) -> int | None:
+    """How far into a stick ``node``'s value starts, if it starts inside one.
+
+    Read from the value's own strides and storage offset, so it covers any slice
+    or ``split`` chunk of the last dim (``x[..., 65:]``), however it was taken.
+    In the row-major device layout each row starts on a stick, so the offset
+    within a row decides where the stick starts.  ``None`` for an offset that is
+    a whole number of sticks, for a value whose last dim is not dense, for a
+    one-element-wide one, and for a view of a graph input that is itself at an
+    offset.
+    """
+    val = node.meta.get("val")
+    if not isinstance(val, torch.Tensor) or val.dim() == 0:
+        return None
+    root = _view_root(node)
+    root_val = root.meta.get("val")
+    if root.op == "placeholder" and (
+        not isinstance(root_val, torch.Tensor) or root_val.storage_offset() != 0
+    ):
+        # TODO(#6772): a graph input that is itself at an in-stick offset (a
+        # chunk computed by an earlier graph).  Compiled reads of such an input
+        # give wrong values, its clone included, so it is left to fail to
+        # compile.
+        return None
+    sizes, strides = list(val.shape), list(val.stride())
+    offset = val.storage_offset()
+    if not all(isinstance(v, int) for v in (*sizes, *strides, offset)):
+        return None
+    if strides[-1] != 1 or sizes[-1] <= 1:
+        # TODO(#6435): a one-element-wide chunk's clone asserts in the padding
+        # pass, so cloning it would replace this error with that one.
+        return None
+    rows = [st for sz, st in zip(sizes[:-1], strides[:-1]) if sz > 1 and st > 0]
+    if rows:
+        offset %= min(rows)
+    return offset % get_elem_in_stick(val.dtype) or None
+
+
+_VIEW_OPS = (
+    aten.slice.Tensor,
+    aten.split.Tensor,
+    aten.split_with_sizes.default,
+    aten.unsqueeze.default,
+    aten.squeeze.dim,
+    aten.view.default,
+    aten.reshape.default,
+    aten._unsafe_view.default,
+    aten.permute.default,
+    aten.expand.default,
+)
+
+
+def _view_root(node: torch.fx.Node) -> torch.fx.Node:
+    """The node whose storage ``node`` views: follows views and split chunks."""
+    while node.op == "call_function":
+        if node.target is operator.getitem:
+            node = node.args[0]
+        elif node.target in _VIEW_OPS:
+            node = node.args[0]
+        else:
+            break
+    return node
+
+
+def _is_pointwise(node: torch.fx.Node) -> bool:
+    return node.op == "call_function" and torch.Tag.pointwise in getattr(
+        node.target, "tags", ()
+    )
+
+
+def clone_in_stick_views_into_cat(graph: torch.fx.Graph) -> None:
+    """Copy a view that starts inside a stick before a ``cat`` writes it.
+
+    ``torch.stack([c * 1.0 for c in x.split(65, -1)])`` writes each chunk into a
+    slice of the stack buffer, whose layout fixes the writer's output stick.  The
+    second chunk's stick starts one element into a stick (``Mod(d1, 64) + 1``), and
+    removing that offset takes two restickifies, onto a non-stick dim and back; an
+    edge in the restickify planner carries one, so it reports "no mechanism to
+    resolve stick incompatibility" (#5216).  ``clone`` is the op whose layout rule
+    takes that route (``_clone_layout``, case 2), so the view is cloned where it
+    is read and the writer then copies an offset-free tensor.
+
+    The view is any value that starts inside a stick (``_in_stick_offset``): a
+    slice or chunk taken in this graph.  A graph input that already starts inside
+    a stick (a chunk computed by an earlier graph) is left alone: its clone reads
+    the wrong elements, so it keeps failing to compile (#6772).  Only views that
+    reach a ``cat`` or ``stack`` input through pointwise ops and ``unsqueeze`` are
+    cloned, and only when the ``cat`` is not on the input's last dim: a cat along
+    the stick dim puts the chunk back at the same in-stick offset and needs no
+    copy.  A chunk one element wide is left alone (#6435).
+
+    Temporary: this pays two restickifies of the view.  Drop it once the planner
+    can remove an in-stick offset on an edge whose output layout is fixed.
+    """
+    path_users: dict[torch.fx.Node, list[torch.fx.Node]] = {}
+    for node in graph.nodes:
+        if node.op != "call_function" or node.target not in (
+            aten.cat.default,
+            aten.stack.default,
+        ):
+            continue
+        inputs = node.args[0]
+        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim", 0)
+        first = inputs[0].meta.get("val") if inputs else None
+        if not isinstance(first, torch.Tensor):
+            continue
+        rank = first.dim() + (node.target is aten.stack.default)
+        if dim % rank >= first.dim() - (node.target is aten.cat.default):
+            continue  # Along the stick dim: no offset to remove.
+        stack = [(inp, node) for inp in inputs if isinstance(inp, torch.fx.Node)]
+        seen: set[torch.fx.Node] = set()
+        while stack:
+            cur, user = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            if _is_pointwise(cur) or cur.target is aten.unsqueeze.default:
+                stack.extend((a, cur) for a in cur.all_input_nodes if "val" in a.meta)
+            elif _in_stick_offset(cur) is not None:
+                path_users.setdefault(cur, [])
+                if user not in path_users[cur]:
+                    path_users[cur].append(user)
+
+    order = {n: i for i, n in enumerate(graph.nodes)}
+    for view, users in path_users.items():
+        val = view.meta["val"]
+        # One clone, placed before the first user on a path to a cat, serves
+        # every such user; other users of the view keep reading the view.
+        with graph.inserting_before(min(users, key=order.__getitem__)):
+            copy = graph.call_function(
+                aten.clone.default,
+                (view,),
+                {"memory_format": torch.contiguous_format},
+            )
+        copy.meta["val"] = torch.empty_like(val, device="meta").contiguous()
+        copy_fx_custom_meta(view, copy)
+        for user in users:
+            user.replace_input_with(view, copy)
+        logger.debug(
+            "clone_in_stick_views_into_cat: %s starts %d elements into a stick; "
+            "cloned for %s",
+            view.name,
+            _in_stick_offset(view),
+            [u.name for u in users],
+        )
 
     graph.lint()

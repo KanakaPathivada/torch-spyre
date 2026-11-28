@@ -2706,20 +2706,6 @@ class TestSplitUnaligned:
                     x,
                 )
             return
-        if execution_mode == "compiled" and consumer == "pointwise":
-            # TODO: Convert to positive test when unaligned split offsets are supported (#5216)
-            with pytest.raises(
-                InductorError,
-                match=r"NotImplementedError: buf\d+ \(Pointwise\): no mechanism to resolve stick incompatibility",
-            ):
-                _compare_modes(
-                    execution_mode,
-                    lambda t: torch.stack(
-                        [_apply_consumer(c, consumer) for c in t.split(65, dim=-1)]
-                    ),
-                    x,
-                )
-            return
         _compare_modes(
             execution_mode,
             lambda t: torch.stack(
@@ -2744,20 +2730,6 @@ class TestSplitUnaligned:
             with pytest.raises(
                 (InductorError, LoweringException),
                 match=r"Unsupported: (Spyre backend does not support: )?(spyre::)?copy_from_d2d of a sliced view requires a stick-aligned storage_offset",
-            ):
-                _compare_modes(
-                    execution_mode,
-                    lambda t: torch.stack(
-                        [_apply_consumer(c, consumer) for c in t.split(70, dim=-1)]
-                    ),
-                    x,
-                )
-            return
-        if execution_mode == "compiled" and consumer == "pointwise":
-            # TODO: Convert to positive test when unaligned split offsets are supported (#5216)
-            with pytest.raises(
-                InductorError,
-                match=r"NotImplementedError: buf\d+ \(Pointwise\): no mechanism to resolve stick incompatibility",
             ):
                 _compare_modes(
                     execution_mode,
@@ -2799,20 +2771,6 @@ class TestSplitUnaligned:
             with pytest.raises(
                 (InductorError, LoweringException),
                 match=r"Unsupported: (Spyre backend does not support: )?(spyre::)?copy_from_d2d of a sliced view requires a stick-aligned storage_offset",
-            ):
-                _compare_modes(
-                    execution_mode,
-                    lambda t: torch.stack(
-                        [_apply_consumer(c, consumer) for c in t.split(65, dim=-1)]
-                    ),
-                    x,
-                )
-            return
-        if execution_mode == "compiled" and consumer == "pointwise":
-            # TODO: Convert to positive test when unaligned split offsets are supported (#5216)
-            with pytest.raises(
-                InductorError,
-                match=r"NotImplementedError: buf\d+ \(Pointwise\): no mechanism to resolve stick incompatibility",
             ):
                 _compare_modes(
                     execution_mode,
@@ -2870,6 +2828,183 @@ class TestSplitUnaligned:
         )
 
 
+@pytest.mark.parametrize("dtype", DTYPES)
+class TestUnalignedChunkIntoCatCompiled:
+    """Compiled forms of a chunk that starts inside a stick written into a cat on
+    another dim, besides the ``stack`` of split chunks above (#5216). Compiled
+    only: the eager side of these views is #5383."""
+
+    def test_cat_dim0_of_split_chunks(self, dtype):
+        """[8,130]→split(65,dim=-1)→cat(dim=0)→[16,65]. Second chunk starts at 65."""
+        x = cached_randn(
+            (8, 130), dtype=dtype, differentiation=f"cat_dim0_split_chunks_{dtype}"
+        )
+        _compare_modes(
+            "compiled",
+            lambda t: torch.cat([c * 1.0 for c in t.split(65, dim=-1)], 0),
+            x,
+        )
+
+    def test_stack_of_slices_with_different_consumers(self, dtype):
+        """[4,32,140]: stack(t[..., :70] * 2, t[..., 70:] + 1). Slices, not split."""
+        x = cached_randn(
+            (4, 32, 140), dtype=dtype, differentiation=f"stack_of_slices_{dtype}"
+        )
+        _compare_modes(
+            "compiled",
+            lambda t: torch.stack([t[..., :70] * 2.0, t[..., 70:] + 1.0]),
+            x,
+        )
+
+    def test_cat_dim0_of_chunk_and_fresh_tensor(self, dtype):
+        """cat(dim=0) of [8,130][:, 65:] (starts inside a stick) and a fresh [8,65]."""
+        x = cached_randn(
+            (8, 130), dtype=dtype, differentiation=f"cat_chunk_and_fresh_x_{dtype}"
+        )
+        y = cached_randn(
+            (8, 65), dtype=dtype, differentiation=f"cat_chunk_and_fresh_y_{dtype}"
+        )
+        _compare_modes(
+            "compiled", lambda t, u: torch.cat([t[:, 65:] * 1.0, u * 2.0], 0), x, y
+        )
+
+    def test_stack_dim1_of_split_chunks(self, dtype):
+        """[8,130]→split(65,dim=-1)→stack(dim=1)→[8,2,65]. Compiled before the fix;
+        the chunk is now cloned, so this checks the values stay right."""
+        x = cached_randn(
+            (8, 130), dtype=dtype, differentiation=f"stack_dim1_split_chunks_{dtype}"
+        )
+        _compare_modes(
+            "compiled",
+            lambda t: torch.stack([c * 1.0 for c in t.split(65, dim=-1)], 1),
+            x,
+        )
+
+    def test_split_offset_past_the_first_stick(self, dtype):
+        """[8,192]→split(96,dim=-1)→stack. Second chunk starts 32 into its stick."""
+        x = cached_randn(
+            (8, 192), dtype=dtype, differentiation=f"split_offset_past_stick_{dtype}"
+        )
+        _compare_modes(
+            "compiled",
+            lambda t: torch.stack([c * 1.0 for c in t.split(96, dim=-1)]),
+            x,
+        )
+
+    @expects_raise
+    def test_chunk_from_an_earlier_graph_is_rejected(self, dtype):
+        """A chunk returned by one compiled graph (storage offset 65) stacked in
+        another: the offset arrives with the input, not from a slice in the graph."""
+        # TODO(#6772): convert to a positive test once a compiled graph reads such
+        # an input correctly; it must keep failing to compile until then, never
+        # return wrong values.
+        x = cached_randn(
+            (8, 130), dtype=dtype, differentiation=f"chunk_from_earlier_graph_{dtype}"
+        )
+        y = cached_randn(
+            (8, 65), dtype=dtype, differentiation=f"chunk_from_earlier_graph_y_{dtype}"
+        )
+        torch.compiler.reset()
+        chunk = torch.compile(lambda t: t.split(65, -1)[1] * 1.0, dynamic=False)(
+            x.to("spyre")
+        )
+        assert chunk.storage_offset() == 65
+        with pytest.raises(
+            InductorError,
+            match=r"NotImplementedError: buf\d+ \(Pointwise\): no mechanism to resolve stick incompatibility",
+        ):
+            torch.compile(lambda a, b: torch.stack([a, b]), dynamic=False)(
+                y.to("spyre"), chunk
+            )
+
+
+class TestCloneInStickViewsIntoCat:
+    """Host-only checks of ``clone_in_stick_views_into_cat`` (#5216): which views
+    it clones, and that the rewritten graph computes the same values."""
+
+    @staticmethod
+    def _rewrite(fn, *inputs):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        from torch_spyre._inductor.temp_passes import clone_in_stick_views_into_cat
+
+        gm = make_fx(fn, tracing_mode="fake")(*inputs)
+        clone_in_stick_views_into_cat(gm.graph)
+        gm.recompile()
+        torch.testing.assert_close(gm(*inputs), fn(*inputs))
+        return [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is torch.ops.aten.clone.default
+        ]
+
+    @staticmethod
+    def _randn(*shape):
+        return torch.randn(*shape, dtype=torch.float16)
+
+    def test_chunk_starting_inside_a_stick_is_cloned(self):
+        clones = self._rewrite(
+            lambda t: torch.stack([c * 1.0 for c in t.split(65, dim=-1)]),
+            self._randn(8, 130),
+        )
+        # Only the second chunk (start 65) starts inside a stick; its read is
+        # cloned and the multiply reads the clone.
+        assert len(clones) == 1
+        assert clones[0].args[0].args[1] == 1
+        assert [u.target for u in clones[0].users] == [torch.ops.aten.mul.Tensor]
+
+    def test_slice_into_cat_dim_0_is_cloned(self):
+        clones = self._rewrite(
+            lambda t: torch.cat([t[:, :70], t[:, 70:]], 0), self._randn(4, 140)
+        )
+        assert len(clones) == 1
+        assert clones[0].args[0].args[2] == 70
+
+    def test_graph_input_starting_inside_a_stick_is_not_cloned(self):
+        # TODO(#6772): a chunk computed by an earlier graph arrives as an
+        # input at storage offset 65; its clone would read the wrong elements, so
+        # the pass leaves it to fail to compile rather than return wrong values.
+        chunk = self._randn(8, 130)[:, 65:]
+        assert not self._rewrite(
+            lambda a, b: torch.stack([a, b]), self._randn(8, 65), chunk
+        )
+
+    def test_slice_of_a_graph_input_is_cloned(self):
+        # The same offset taken in this graph, from an input at offset 0, is cloned.
+        clones = self._rewrite(
+            lambda a, t: torch.stack([a, t[:, 65:]]),
+            self._randn(8, 65),
+            self._randn(8, 130),
+        )
+        assert len(clones) == 1
+        assert clones[0].args[0].target is torch.ops.aten.slice.Tensor
+
+    def test_stick_aligned_chunks_are_not_cloned(self):
+        assert not self._rewrite(
+            lambda t: torch.stack([c * 1.0 for c in t.split(64, dim=-1)]),
+            self._randn(8, 128),
+        )
+
+    def test_cat_along_the_stick_dim_is_not_cloned(self):
+        assert not self._rewrite(
+            lambda t: torch.cat([c * 1.0 for c in t.split(65, dim=-1)], -1),
+            self._randn(8, 130),
+        )
+
+    def test_reduction_between_slice_and_cat_is_not_cloned(self):
+        assert not self._rewrite(
+            lambda t: torch.stack([c.sum(-1) for c in t.split(65, dim=-1)]),
+            self._randn(8, 130),
+        )
+
+    def test_one_element_wide_chunk_is_not_cloned(self):
+        # TODO(#6435): its clone asserts in the padding pass.
+        assert not self._rewrite(
+            lambda t: torch.stack([c * 1.0 for c in t.split(1, dim=-1)]),
+            self._randn(4, 32, 2),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Tensors containing size-1 dimensions
 # ---------------------------------------------------------------------------
@@ -2903,7 +3038,7 @@ class TestSplitSize1:
                 )
         else:
             if consumer == "pointwise":
-                # TODO: Convert to positive test when sub-stick split chunks are supported (#5216)
+                # TODO: Convert to positive test once fixed; split(1) chunks of a size-2 stick dim (#6435)
                 match = r"(?s)NotImplementedError: buf\d+ \(Pointwise\): no mechanism to resolve stick incompatibility.*No mechanism to scatter elements from one stick to multiple sticks"
             else:
                 # TODO: Convert to positive test once fixed; bare AssertionError in padding.py _pad_restickify_output (#6435)
